@@ -9,7 +9,11 @@ import pino from 'pino';
 import type { WebSocket as WsSocket } from 'ws';
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
-import { LOOK_BACK_TOOL_NAME, PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
+import {
+  LOOK_BACK_TOOL_NAME,
+  PASS_TO_AGENT_TOOL_NAME,
+  SEND_TO_CHAT_TOOL_NAME,
+} from '../src/audio/voiceAgent.js';
 import {
   GeminiLiveSession,
   MANAGER_FALSE_CLAIM_CORRECTION,
@@ -25,14 +29,13 @@ import {
   type ElevenLabsAgentDeps,
   type ElevenLabsWsCtor,
 } from '../src/audio/elevenlabs-agent.js';
+import { MANAGER_QUICK_TOOLS, type ManagerVoiceTools } from '../src/audio/managerVoice.js';
+import { MANAGER_CHAT_ID } from '../src/audio/chatLookup.js';
 import {
-  MANAGER_QUICK_TOOLS,
-  SEND_TO_CHAT_TOOL_NAME,
-  type ManagerSendAccepted,
-  type ManagerVoiceTools,
-} from '../src/audio/managerVoice.js';
-import { ChatLookupError, MANAGER_CHAT_ID } from '../src/audio/chatLookup.js';
-import { CHAT_STATUS_TOOL_NAME, FIND_CHATS_TOOL_NAME } from '../src/audio/voiceAgent.js';
+  CHAT_STATUS_TOOL_NAME,
+  FIND_CHATS_TOOL_NAME,
+  type VoiceAgentLink,
+} from '../src/audio/voiceAgent.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { AudioEvent } from '@patch/wire/audio';
 
@@ -68,29 +71,29 @@ const timeline = () => ({
   },
 });
 
-/** A manager whose send waits for the test to release the chat's reply. */
-function fakeManager(
-  opts: {
-    sendFails?: Error;
-  } = {},
-) {
-  let release!: (reply: string) => void;
-  const sendToChat = vi.fn(
-    async (req: {
-      chat: string;
-      message: string;
-      onAccepted?: (i: ManagerSendAccepted) => void;
-    }) => {
-      if (opts.sendFails) throw opts.sendFails;
-      req.onAccepted?.({ name: 'Garden planning' });
-      const reply = await new Promise<string>((r) => (release = r));
-      return { name: 'Garden planning', reply };
-    },
-  );
+/** A manager with no quick tools wired; the send path is the shared link's. */
+function fakeManager() {
   const manager: ManagerVoiceTools = {
-    sendToChat,
+    quick: vi.fn(async () => 'done'),
   };
-  return { manager, sendToChat, release: (r: string) => release(r) };
+  return { manager };
+}
+
+/** A link whose send is answered once, and whose reply the test releases. */
+function fakeSend(opts: { reply?: string; miss?: string; fails?: Error } = {}) {
+  let release!: (reply: string) => void;
+  const { link, passed } = fakeVoiceAgentLink({
+    sendToChat: async () => {
+      if (opts.fails) throw opts.fails;
+      if (opts.miss) return { ok: false, message: opts.miss };
+      return {
+        ok: true,
+        name: 'Garden planning',
+        reply: new Promise<string>((r) => (release = r)),
+      };
+    },
+  });
+  return { link, passed, release: (r: string) => release(r) };
 }
 
 // ---------------------------------------------------------------------------
@@ -122,10 +125,16 @@ class FakeGeminiWs extends EventEmitter {
   }
 }
 
-async function openGemini(manager: ManagerVoiceTools | undefined, chatId = MANAGER_CHAT_ID) {
+async function openGemini(
+  manager: ManagerVoiceTools | undefined,
+  chatId = MANAGER_CHAT_ID,
+  given?: VoiceAgentLink,
+) {
   const last: { ws?: FakeGeminiWs } = {};
   const events: AudioEvent[] = [];
-  const { link, passed } = fakeVoiceAgentLink();
+  const fake = fakeVoiceAgentLink();
+  const link = given ?? fake.link;
+  const passed = fake.passed;
   const deps: GeminiLiveDeps = {
     logger,
     sendAudio: (e) => events.push(e),
@@ -158,11 +167,11 @@ describe('Gemini Live on a Manager call', () => {
     const setup = ws.json()[0]!['setup'];
     const names = setup.tools[0].functionDeclarations.map((d: { name: string }) => d.name);
     expect(names).toEqual([
-      SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
       LOOK_BACK_TOOL_NAME,
       FIND_CHATS_TOOL_NAME,
       CHAT_STATUS_TOOL_NAME,
+      SEND_TO_CHAT_TOOL_NAME,
       'end_call',
     ]);
     const text = setup.systemInstruction.parts[0].text as string;
@@ -181,14 +190,16 @@ describe('Gemini Live on a Manager call', () => {
       LOOK_BACK_TOOL_NAME,
       FIND_CHATS_TOOL_NAME,
       CHAT_STATUS_TOOL_NAME,
+      SEND_TO_CHAT_TOOL_NAME,
       'end_call',
       'switch_chat',
     ]);
   });
 
-  test('send_to_chat is answered once the chat has it; its reply arrives later as a message', async () => {
-    const { manager, sendToChat, release } = fakeManager();
-    const { ws, passed } = await openGemini(manager);
+  test('send_to_chat answers received at once; the chat’s reply arrives later as a message', async () => {
+    const { manager } = fakeManager();
+    const { link, release } = fakeSend();
+    const { ws, passed } = await openGemini(manager, MANAGER_CHAT_ID, link);
     ws.serverSend({
       toolCall: {
         functionCalls: [
@@ -201,26 +212,65 @@ describe('Gemini Live on a Manager call', () => {
       },
     });
     await vi.waitFor(() => expect(ws.toolResponses()).toHaveLength(1));
-    expect(sendToChat).toHaveBeenCalledWith(
-      expect.objectContaining({ chat: 'garden', message: 'use ferns' }),
-    );
+    expect(link.sendToChat).toHaveBeenCalledWith({
+      chatId: MANAGER_CHAT_ID,
+      chat: 'garden',
+      message: 'use ferns',
+    });
     // The Manager's own agent is not in the loop.
     expect(passed).toHaveLength(0);
-    const started = ws.toolResponses()[0]!;
-    expect(started).toMatchObject({ id: 's1', name: SEND_TO_CHAT_TOOL_NAME });
-    expect(started['response'].result).toBe('started');
-    expect(started['response'].note).toContain('"Garden planning" has the message');
+    expect(ws.toolResponses()[0]).toMatchObject({ id: 's1', name: SEND_TO_CHAT_TOOL_NAME });
+    expect(ws.toolResponses()[0]!['response'].result).toBe('received');
     release('Ferns are in the plan.');
     await vi.waitFor(() => expect(ws.clientTurns().length).toBe(1));
     expect(ws.clientTurns()[0]).toContain('The chat "Garden planning" has answered');
     expect(ws.clientTurns()[0]).toContain('Ferns are in the plan.');
   });
 
-  test('a name that is not one chat comes back to the voice to ask, with no error raised', async () => {
-    const { manager } = fakeManager({
-      sendFails: new ChatLookupError('Several chats match "bus": "A", "B".'),
+  test('an ordinary call sends to a chat the same way, and the reply is pushed back once', async () => {
+    const { link, release } = fakeSend();
+    const { ws } = await openGemini(undefined, 'chat-1', link);
+    ws.serverSend({
+      toolCall: {
+        functionCalls: [
+          { id: 's5', name: SEND_TO_CHAT_TOOL_NAME, args: { chat: 'garden', message: 'status?' } },
+        ],
+      },
     });
-    const { ws, events } = await openGemini(manager);
+    await vi.waitFor(() => expect(ws.toolResponses()).toHaveLength(1));
+    expect(ws.toolResponses()[0]!['response'].result).toBe('received');
+    expect(link.sendToChat).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      chat: 'garden',
+      message: 'status?',
+    });
+    release('Nearly done.');
+    await vi.waitFor(() => expect(ws.clientTurns().length).toBe(1));
+    expect(ws.clientTurns()[0]).toContain('Nearly done.');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ws.clientTurns().length).toBe(1);
+  });
+
+  test('a receipt is not pushed as an answer', async () => {
+    const { link, release } = fakeSend();
+    const { ws } = await openGemini(undefined, 'chat-1', link);
+    ws.serverSend({
+      toolCall: {
+        functionCalls: [
+          { id: 's6', name: SEND_TO_CHAT_TOOL_NAME, args: { chat: 'garden', message: 'x' } },
+        ],
+      },
+    });
+    await vi.waitFor(() => expect(ws.toolResponses()).toHaveLength(1));
+    release('');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ws.clientTurns()).toEqual([]);
+  });
+
+  test('a name that is not one chat comes back to the voice to ask, with no error raised', async () => {
+    const { manager } = fakeManager();
+    const { link } = fakeSend({ miss: 'Several chats match "bus": "A", "B".' });
+    const { ws, events } = await openGemini(manager, MANAGER_CHAT_ID, link);
     ws.serverSend({
       toolCall: {
         functionCalls: [
@@ -229,14 +279,14 @@ describe('Gemini Live on a Manager call', () => {
       },
     });
     await vi.waitFor(() => expect(ws.toolResponses()).toHaveLength(1));
-    expect(ws.toolResponses()[0]!['response']).toMatchObject({ result: 'failed' });
-    expect(ws.toolResponses()[0]!['response'].note).toContain('Several chats match');
+    expect(ws.toolResponses()[0]!['response'].result).toContain('Several chats match');
     expect(events.some((e) => e.type === 'audio.error')).toBe(false);
   });
 
   test('a message that did not go in is an audible error', async () => {
-    const { manager } = fakeManager({ sendFails: new Error('host offline') });
-    const { ws, events } = await openGemini(manager);
+    const { manager } = fakeManager();
+    const { link } = fakeSend({ fails: new Error('host offline') });
+    const { ws, events } = await openGemini(manager, MANAGER_CHAT_ID, link);
     ws.serverSend({
       toolCall: {
         functionCalls: [
@@ -246,7 +296,9 @@ describe('Gemini Live on a Manager call', () => {
     });
     await vi.waitFor(() =>
       expect(
-        events.some((e) => e.type === 'audio.error' && /not sent.*host offline/.test(e.message)),
+        events.some(
+          (e) => e.type === 'audio.error' && /send_to_chat failed.*host offline/.test(e.message),
+        ),
       ).toBe(true),
     );
   });
@@ -302,10 +354,12 @@ class FakeOpenAIWs extends EventEmitter {
   }
 }
 
-async function openOpenAI(manager: ManagerVoiceTools) {
+async function openOpenAI(manager: ManagerVoiceTools, given?: VoiceAgentLink) {
   const last: { ws?: FakeOpenAIWs } = {};
   const events: AudioEvent[] = [];
-  const { link, passed } = fakeVoiceAgentLink();
+  const fake = fakeVoiceAgentLink();
+  const link = given ?? fake.link;
+  const passed = fake.passed;
   const deps: OpenAIRealtimeDeps = {
     logger,
     sendAudio: (e) => events.push(e),
@@ -333,16 +387,17 @@ async function openOpenAI(manager: ManagerVoiceTools) {
 }
 
 describe('OpenAI Realtime on a Manager call', () => {
-  test('declares the manager tools, and send_to_chat returns the chat reply as the call output', async () => {
-    const { manager, release } = fakeManager();
-    const { ws, passed } = await openOpenAI(manager);
+  test('declares the manager tools, and send_to_chat answers received at once', async () => {
+    const { manager } = fakeManager();
+    const { link, passed } = fakeSend();
+    const { ws } = await openOpenAI(manager, link);
     const session = ws.ofType('session.update')[0]!['session'];
     expect(session.tools.map((t: { name: string }) => t.name)).toEqual([
-      SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
       LOOK_BACK_TOOL_NAME,
       FIND_CHATS_TOOL_NAME,
       CHAT_STATUS_TOOL_NAME,
+      SEND_TO_CHAT_TOOL_NAME,
       'end_call',
     ]);
     expect(session.instructions).toContain('You are the Manager');
@@ -352,22 +407,22 @@ describe('OpenAI Realtime on a Manager call', () => {
       call_id: 'o1',
       arguments: JSON.stringify({ chat: 'garden', message: 'use ferns' }),
     });
-    await vi.waitFor(() => expect(manager.sendToChat).toHaveBeenCalled());
-    expect(ws.ofType('conversation.item.create')).toHaveLength(0);
-    release('Ferns are in.');
     await vi.waitFor(() => expect(ws.ofType('conversation.item.create')).toHaveLength(1));
     const item = ws.ofType('conversation.item.create')[0]!['item'];
     expect(item).toMatchObject({ type: 'function_call_output', call_id: 'o1' });
-    expect(JSON.parse(item.output).result).toBe('"Garden planning" replied: Ferns are in.');
-    expect(ws.ofType('response.create')).toHaveLength(1);
+    expect(JSON.parse(item.output).result).toBe('received');
+    expect(link.sendToChat).toHaveBeenCalledWith({
+      chatId: MANAGER_CHAT_ID,
+      chat: 'garden',
+      message: 'use ferns',
+    });
     expect(passed).toHaveLength(0);
   });
 
   test('a lookup miss is handed back to the voice without an error', async () => {
-    const { manager } = fakeManager({
-      sendFails: new ChatLookupError('No chat matches "x".'),
-    });
-    const { ws, events } = await openOpenAI(manager);
+    const { manager } = fakeManager();
+    const { link } = fakeSend({ miss: 'No chat matches "x".' });
+    const { ws, events } = await openOpenAI(manager, link);
     ws.serverSend({
       type: 'response.function_call_arguments.done',
       name: SEND_TO_CHAT_TOOL_NAME,
@@ -401,8 +456,9 @@ class FakeElevenWs extends EventEmitter {
 }
 
 describe('ElevenLabs Agents on a Manager call', () => {
-  test('provisions the manager tools, and send_to_chat answers with the chat reply', async () => {
-    const { manager, release } = fakeManager();
+  test('provisions the manager tools, and send_to_chat answers received at once', async () => {
+    const { manager } = fakeManager();
+    const sendLink = fakeSend().link;
     const rest: Array<{ path: string; body: any }> = [];
     let n = 0;
     const fetchImpl = vi.fn(async (url: string, req: RequestInit) => {
@@ -420,7 +476,7 @@ describe('ElevenLabs Agents on a Manager call', () => {
       logger,
       sendAudio: () => {},
       sendBinary: () => {},
-      link: fakeVoiceAgentLink().link,
+      link: sendLink,
       instructions: DEFAULT_VOICE_INSTRUCTIONS,
       apiKey: 'k',
       llm: 'claude-haiku-4-5',
@@ -451,17 +507,15 @@ describe('ElevenLabs Agents on a Manager call', () => {
     await vi.waitFor(() => expect(session.getState()).toBe('listening'));
     const tools = rest.filter((r) => r.path === '/v1/convai/tools');
     expect(tools.map((t) => t.body.tool_config.name)).toEqual([
-      SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
       LOOK_BACK_TOOL_NAME,
       FIND_CHATS_TOOL_NAME,
       CHAT_STATUS_TOOL_NAME,
+      SEND_TO_CHAT_TOOL_NAME,
       'end_call',
     ]);
-    expect(Object.keys(tools[0]!.body.tool_config.parameters.properties)).toEqual([
-      'chat',
-      'message',
-    ]);
+    const send = tools.find((t) => t.body.tool_config.name === SEND_TO_CHAT_TOOL_NAME)!;
+    expect(Object.keys(send.body.tool_config.parameters.properties)).toEqual(['chat', 'message']);
     const agent = rest.find((r) => r.path === '/v1/convai/agents/create')!.body;
     expect(agent.conversation_config.agent.prompt.prompt).toContain('You are the Manager');
     ws.serverSend({
@@ -472,13 +526,16 @@ describe('ElevenLabs Agents on a Manager call', () => {
         parameters: { chat: 'garden', message: 'use ferns' },
       },
     });
-    await vi.waitFor(() => expect(manager.sendToChat).toHaveBeenCalled());
-    release('Ferns are in.');
     await vi.waitFor(() => expect(ws.ofType('client_tool_result')).toHaveLength(1));
     const result = ws.ofType('client_tool_result')[0]!;
     expect(result['tool_call_id']).toBe('e1');
     expect(result['is_error']).toBe(false);
-    expect(result['result']).toContain('"Garden planning" replied: Ferns are in.');
+    expect(result['result']).toBe('received');
+    expect(sendLink.sendToChat).toHaveBeenCalledWith({
+      chatId: MANAGER_CHAT_ID,
+      chat: 'garden',
+      message: 'use ferns',
+    });
     await session.close();
   });
 });

@@ -482,8 +482,9 @@ describe('audio server — hosted backends on every app surface', () => {
       const surface = await openSurface(s.port, `e-${mode}`, 'voice-call', mode);
       await until(() => expect(eleven).toHaveLength(1));
       expect(eleven[0]!.url).toBe('wss://signed/c');
-      // One client tool each: pass_to_agent, check_status, look_back, find_chats, chat_status, end_call, switch_chat.
+      // One client tool each: pass_to_agent, check_status, look_back, find_chats, chat_status, send_to_chat, end_call, switch_chat.
       expect(elevenRest).toEqual([
+        'POST /v1/convai/tools',
         'POST /v1/convai/tools',
         'POST /v1/convai/tools',
         'POST /v1/convai/tools',

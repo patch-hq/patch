@@ -31,9 +31,11 @@ import {
   HANDOFF_RECEIVED,
   LOOK_BACK_TOOL_NAME,
   PASS_TO_AGENT_TOOL_NAME,
+  SEND_TO_CHAT_TOOL_NAME,
   SWITCH_CHAT_TOOL_NAME,
   END_CALL_TOOL_NAME,
   switchedMessage,
+  chatReplyMessage,
   type StartContext,
   type VoiceAgentLink,
 } from './voiceAgent.js';
@@ -209,6 +211,7 @@ export class VoiceAgentCall {
       name === LOOK_BACK_TOOL_NAME ||
       name === FIND_CHATS_TOOL_NAME ||
       name === CHAT_STATUS_TOOL_NAME ||
+      name === SEND_TO_CHAT_TOOL_NAME ||
       name === SWITCH_CHAT_TOOL_NAME ||
       name === END_CALL_TOOL_NAME
     );
@@ -245,6 +248,15 @@ export class VoiceAgentCall {
           return await link.findChats(this.chat, arg('query'));
         case CHAT_STATUS_TOOL_NAME:
           return await link.chatStatus(this.chat, arg('chat'));
+        case SEND_TO_CHAT_TOOL_NAME: {
+          const message = arg('message');
+          const sent = await link.sendToChat({ chatId: this.chat, chat: arg('chat'), message });
+          if (!sent.ok) return sent.message;
+          this.handoffOpened();
+          this.opts.sendAudio({ type: 'audio.passed_to_agent', sessionId });
+          this.followChatReply(sent.name, message, sent.reply);
+          return HANDOFF_RECEIVED;
+        }
         case SWITCH_CHAT_TOOL_NAME: {
           const outcome = await link.switchChat(sessionId, this.chat, arg('chat'));
           if (!outcome.ok) return outcome.message;
@@ -308,6 +320,33 @@ export class VoiceAgentCall {
         'voice: the goodbye did not finish in time; ending the call anyway',
       );
     }
+  }
+
+  /**
+   * The reply of a chat the call sent a message to, pushed in like a hand-off's
+   * answer. A reply with no text is a pure receipt and is not an answer.
+   */
+  private followChatReply(name: string, message: string, reply: Promise<string>): void {
+    reply.then(
+      (text) => {
+        if (text.trim() === '') {
+          this.handoffClosed();
+          return;
+        }
+        this.push(chatReplyMessage(name, message, text), { handoffSettled: true });
+      },
+      (err: Error) => {
+        this.opts.logger.error(
+          { sessionId: this.opts.sessionId, err: err.message },
+          'voice: the chat a message was sent to failed to answer',
+        );
+        this.push(
+          `The chat "${name}" did not answer the message you sent it ("${message}"): it failed ` +
+            `(${err.message}). Tell the user.`,
+          { handoffSettled: true },
+        );
+      },
+    );
   }
 
   /** Add a start context's catch-up once it is written; show its failure on the call bar. */

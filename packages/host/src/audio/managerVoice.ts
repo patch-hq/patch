@@ -16,22 +16,16 @@
 // can be overridden later), the tool definitions the three engines declare, and
 // `createManagerVoiceTools`, the host-side implementation the engines call.
 
-import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import { DEFAULT_MANAGER_VOICE_PROMPT } from '@patch/wire';
-import { CHAT_STATUS_TOOL_NAME, FIND_CHATS_TOOL_NAME } from './voiceAgent.js';
 import {
-  ChatLookupError,
-  LIST_LIMIT,
-  MANAGER_CHAT_ID,
-  displayName,
-  words,
-  type ChatLookup,
-} from './chatLookup.js';
+  CHAT_STATUS_TOOL_NAME,
+  FIND_CHATS_TOOL_NAME,
+  SEND_TO_CHAT_TOOL_NAME,
+} from './voiceAgent.js';
+import { ChatLookupError, LIST_LIMIT, words, type ChatLookup } from './chatLookup.js';
 
 const READ_LIMIT = 25;
-
-export const SEND_TO_CHAT_TOOL_NAME = 'send_to_chat';
 
 /**
  * Tools the voice runs itself on the host, answered at once: the common
@@ -182,11 +176,6 @@ export const MANAGER_QUICK_TOOL_NAMES: ReadonlySet<string> = new Set(
   MANAGER_QUICK_TOOLS.map((t) => t.name),
 );
 
-export const MANAGER_TOOL_NAMES: ReadonlySet<string> = new Set([
-  SEND_TO_CHAT_TOOL_NAME,
-  ...MANAGER_QUICK_TOOL_NAMES,
-]);
-
 /** The string arguments of a tool call, whatever shape the engine gave them. */
 export function stringArgs(raw: unknown): Record<string, string> {
   if (typeof raw !== 'object' || raw === null) return {};
@@ -196,21 +185,6 @@ export function stringArgs(raw: unknown): Record<string, string> {
     ),
   );
 }
-
-export const SEND_TO_CHAT_DESCRIPTION =
-  "Send a message to another chat, by its name or id. The chat's agent receives it as if the user " +
-  'had typed it and works on it. Its reply comes back to you later as a message; meanwhile carry ' +
-  'on the conversation.';
-
-/** The same, for an engine whose tool call stays open until the chat has replied. */
-export const SEND_TO_CHAT_BLOCKING_DESCRIPTION =
-  "Send a message to another chat, by its name or id. The chat's agent receives it as if the user " +
-  "had typed it and works on it; the call returns that chat's reply once it has answered.";
-
-export const MANAGER_TOOL_PARAMS = {
-  chat: "The chat's name (as the user said it, or from find_chats) or its id.",
-  message: 'What to tell the chat, written as the user would put it to that chat.',
-} as const;
 
 /** The built-in voice prompt; Settings → Manager can replace it (`managerVoicePrompt`). */
 /**
@@ -255,8 +229,8 @@ export const MANAGER_TOOLS_RULE =
   'agent told something, unless the tool returned that it was done. If a tool reports it failed ' +
   'or is not set up, say so plainly. Keep every spoken answer to one or two short sentences.\n\n';
 
-/** The async variant (Gemini): the send is answered at once and the reply arrives later. */
-export const MANAGER_ASYNC_REPLY_RULE =
+/** What a Manager call's voice does with a chat's reply, which arrives as a pushed message. */
+export const MANAGER_REPLY_RULE =
   `${SEND_TO_CHAT_TOOL_NAME} answers as soon as the chat has the message. Say in a few words ` +
   'that it has gone — vary how you say it — then carry on. When the chat answers, its reply ' +
   'arrives as a message naming the chat: tell the user the gist in one or two short sentences, ' +
@@ -265,28 +239,8 @@ export const MANAGER_ASYNC_REPLY_RULE =
   'you have already told the user it has gone. Several chats can be working at once. Never say ' +
   '"still waiting" unless the user asks how one is going.\n\n';
 
-/** The blocking variant (OpenAI Realtime, ElevenLabs): the call returns the chat's reply. */
-export const MANAGER_BLOCKING_REPLY_RULE =
-  `${SEND_TO_CHAT_TOOL_NAME} returns once the chat has answered, which can take a while. When it ` +
-  'returns, tell the user the gist of the reply in one or two short sentences, not the whole text, ' +
-  'and let them ask for more.\n\n';
-
-/** What one chat's reply looks like to the voice when it arrives as a message. */
-export function managerReplyMessage(name: string, message: string, reply: string): string {
-  return (
-    `The chat "${name}" has answered the message you sent it ("${message}"). ` +
-    `Its reply, to tell the user now, in your own words (if it is only a receipt that the request ` +
-    `was passed on or sent elsewhere, with no answer, say nothing): ${reply}`
-  );
-}
-
 // ---------------------------------------------------------------------------
 // The host side.
-
-/** What the send tells the voice once the chat has the message. */
-export interface ManagerSendAccepted {
-  name: string;
-}
 
 /** Where a quick tool was called from. */
 export interface ManagerQuickContext {
@@ -311,29 +265,12 @@ export interface ManagerVoiceTools {
   voicePrompt?: () => string;
   /** Run one of {@link MANAGER_QUICK_TOOLS}; rejects when the action failed or is not set up. */
   quick(name: string, args: Record<string, string>, ctx?: ManagerQuickContext): Promise<string>;
-  /**
-   * Deliver `message` to the chat named by `chat`. `onAccepted` fires once the
-   * chat has it (queued or started); the promise resolves with the chat's reply
-   * once its turn settles, whichever host the chat is on. Rejects with
-   * {@link ChatLookupError} when
-   * the name does not pick out one chat, and with a plain error when the
-   * message was not delivered or the chat's turn failed.
-   */
-  sendToChat(req: {
-    chat: string;
-    message: string;
-    onAccepted?: (info: ManagerSendAccepted) => void;
-  }): Promise<{ name: string; reply: string }>;
 }
 
 export interface ManagerVoiceHostDeps {
   logger: Logger;
   /** Finding and resolving chats: the lookup every call shares (chatLookup.ts). */
   lookup: ChatLookup;
-  /** Deliver a message as `patch_send_to` does; resolves once the chat has it. */
-  deliver(req: { chatId: string; message: string; localId: string }): Promise<void>;
-  /** The chat's reply to the message delivered as `localId`, read by the server from its record. */
-  awaitReply(req: { chatId: string; localId: string }): Promise<string>;
   /** Add a to-do; resolves with the task as it was filed. Rejects when Todoist is unreachable. */
   addTask(req: { content: string; due: string; project: string }): Promise<string>;
   /** Open to-dos, on one project or (empty name) across all. Rejects when the project is unknown. */
@@ -351,7 +288,6 @@ export interface ManagerVoiceHostDeps {
   recordNote(line: string): void;
   /** The account's Manager voice prompt, read at the start of each call. */
   voicePrompt?: () => string;
-  now?: () => number;
 }
 
 /** The day after a YYYY-MM-DD date: Google's all-day end is exclusive. */
@@ -439,10 +375,6 @@ export function londonToEpoch(iso: string): number {
 }
 
 export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoiceTools {
-  const now = deps.now ?? Date.now;
-  /** Targets with a message out and no reply yet: a second send would cut the first off. */
-  const awaiting = new Set<string>();
-
   return {
     ...(deps.voicePrompt ? { voicePrompt: deps.voicePrompt } : {}),
     async quick(name, args, ctx) {
@@ -553,57 +485,14 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
       }
       throw new Error(`There is no tool called ${name} on this call.`);
     },
-
-    async sendToChat({ chat, message, onAccepted }) {
-      const target = await deps.lookup.resolve(chat, MANAGER_CHAT_ID);
-      const name = displayName(target);
-      if (message.trim() === '') throw new ChatLookupError('Say what to tell the chat.');
-      if (awaiting.has(target.chatId)) {
-        throw new ChatLookupError(
-          `"${name}" has not answered the last message yet. Tell the user, and send this once it has.`,
-        );
-      }
-      const localId = `manager-voice-${now()}-${randomUUID().slice(0, 8)}`;
-      awaiting.add(target.chatId);
-      try {
-        await deps.deliver({ chatId: target.chatId, message, localId });
-      } catch (err) {
-        awaiting.delete(target.chatId);
-        throw err;
-      }
-      deps.recordNote(
-        target.status === 'archived'
-          ? `-> "${name}" (was archived; this brings it back): ${message}`
-          : `-> "${name}": ${message}`,
-      );
-      onAccepted?.({ name });
-      try {
-        // Read from the server's record by the message's own id, so it is this
-        // message's reply even when the chat was busy and took it later.
-        const reply = await deps.awaitReply({ chatId: target.chatId, localId });
-        deps.recordNote(`<- "${name}": ${reply.trim() === '' ? '(no reply text)' : reply.trim()}`);
-        return { name, reply };
-      } catch (err) {
-        const reason = (err as Error).message;
-        deps.logger.error(
-          { chatId: target.chatId, err: reason },
-          'manager voice: the chat failed to answer',
-        );
-        deps.recordNote(`<- "${name}": failed: ${reason}`);
-        throw err;
-      } finally {
-        awaiting.delete(target.chatId);
-      }
-    },
   };
 }
 
 /**
  * The voice's instructions on a call to the Manager (spec/07 § A call to the
- * Manager). `asyncResult`: a chat's reply arrives later as a message (Gemini)
- * rather than as the send tool's own return (OpenAI Realtime, ElevenLabs).
+ * Manager).
  */
-export function managerHostedInstruction(asyncResult: boolean, voicePrompt?: string): string {
+export function managerHostedInstruction(voicePrompt?: string): string {
   const preamble = voicePrompt?.trim() ? `${voicePrompt.trim()}\n\n` : MANAGER_VOICE_PREAMBLE;
   return (
     preamble +
@@ -611,10 +500,6 @@ export function managerHostedInstruction(asyncResult: boolean, voicePrompt?: str
     MANAGER_TOOLS_RULE +
     ACKNOWLEDGEMENT_RULE +
     '\n\n' +
-    (asyncResult ? MANAGER_ASYNC_REPLY_RULE : MANAGER_BLOCKING_REPLY_RULE)
+    MANAGER_REPLY_RULE
   ).trimEnd();
 }
-
-/** Added to a chat's reply on a Manager call so the voice gives the gist rather than reading it out. */
-export const RESULT_GIST_NOTE =
-  '(Give the user the gist of this in one short sentence; do not read it out.)\n\n';

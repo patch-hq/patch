@@ -25,9 +25,15 @@ import { createKokoro } from '../src/audio/kokoro.js';
 import type { Vad, VadFrameResult } from '../src/audio/vad.js';
 import type { WhisperBackend } from '../src/audio/whisper.js';
 import { createVoiceReplyBridge } from '../src/audio/replyBridge.js';
-import { createManagerVoiceTools, SEND_TO_CHAT_TOOL_NAME } from '../src/audio/managerVoice.js';
+import { createManagerVoiceTools } from '../src/audio/managerVoice.js';
+import { createChatVoice, type ChatVoiceHost } from '../src/audio/chatVoice.js';
+import type { VoiceLedger } from '../src/audio/voiceLedger.js';
 import { createChatLookup, MANAGER_CHAT_ID } from '../src/audio/chatLookup.js';
-import { FIND_CHATS_TOOL_NAME, PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
+import {
+  FIND_CHATS_TOOL_NAME,
+  PASS_TO_AGENT_TOOL_NAME,
+  SEND_TO_CHAT_TOOL_NAME,
+} from '../src/audio/voiceAgent.js';
 import {
   encodeAudio,
   decodeAudio,
@@ -142,7 +148,12 @@ describe('audio server — a hosted call to the Manager', () => {
     const gemini: FakeGeminiWs[] = [];
     const agentTurns: Array<{ chatId: string; message: string }> = [];
     const managerNotes: string[] = [];
-    const delivered: Array<{ chatId: string; message: string; localId: string }> = [];
+    const delivered: Array<{
+      callerChatId: string;
+      chatId: string;
+      message: string;
+      localId: string;
+    }> = [];
     const bridge = createVoiceReplyBridge();
     let seq = 0;
     const emit = (e: WireEvent): void => bridge.observe(e);
@@ -192,13 +203,24 @@ describe('audio server — a hosted call to the Manager', () => {
     const managerVoice = createManagerVoiceTools({
       logger,
       lookup,
+      recordNote: (line) => managerNotes.push(line),
+    });
+    // The shared send, as the host wires it: only the send path of the glue is used here.
+    const glue = createChatVoice({
+      daemon: {
+        recordCallNote: (_chatId: string, line: string) => managerNotes.push(line),
+      } as unknown as ChatVoiceHost,
+      sessionsOnChat: () => [],
+      lookup,
       deliver: async (req) => {
         delivered.push(req);
       },
       // Stands in for the server's record: the reply to the delivered message, by its id.
       awaitReply: ({ chatId, localId }) =>
         bridge.awaitReply(chatId, undefined, localId).then((reply) => reply.text),
-      recordNote: (line) => managerNotes.push(line),
+      ledger: {} as VoiceLedger,
+      logger,
+      onCosted: () => {},
     });
     const cfg: VoiceConfig = {
       ...DEFAULT_VOICE_CONFIG,
@@ -221,6 +243,7 @@ describe('audio server — a hosted call to the Manager', () => {
             passToAgent: (req) => agentTurns.push({ chatId: req.chatId, message: req.request }),
           }).link,
           findChats: (chatId, query) => lookup.findChats(query, chatId),
+          sendToChat: (req) => glue.link.sendToChat(req),
         },
         getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
         submitUserTurn: async ({ chatId, message }) => {
@@ -277,11 +300,12 @@ describe('audio server — a hosted call to the Manager', () => {
     });
     await until(() => expect(t.delivered).toHaveLength(1));
     expect(t.delivered[0]).toMatchObject({
+      callerChatId: MANAGER_CHAT_ID,
       chatId: 'c-garden',
       message: 'put ferns in the north bed',
     });
     await until(() => expect(g.responses()).toHaveLength(2));
-    expect(g.responses()[1]!['response'].result).toBe('started');
+    expect(g.responses()[1]!['response'].result).toBe('received');
 
     t.playTurn('c-garden', t.delivered[0]!.localId, 'Added ferns to the north bed.');
     await until(() => expect(g.clientTurns()).toHaveLength(1));
@@ -312,6 +336,7 @@ describe('audio server — a hosted call to the Manager', () => {
       'look_back',
       'find_chats',
       'chat_status',
+      'send_to_chat',
       'end_call',
       'switch_chat',
     ]);

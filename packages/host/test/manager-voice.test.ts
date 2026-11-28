@@ -1,22 +1,20 @@
 // spec/07 § A call to the Manager — the host side of the Manager voice's tools
-// (find a chat, read where it stands, send it a message and wait for its reply)
+// (find a chat, read where it stands, quick actions)
 // and the prompt text the engines are given.
 
 import { describe, test, expect, vi } from 'vitest';
 import pino from 'pino';
 import {
   createManagerVoiceTools,
-  isManagerCall,
-  SEND_TO_CHAT_TOOL_NAME,
   ACKNOWLEDGEMENT_RULE,
   managerHostedInstruction,
-  type ChatEntry,
   type ManagerVoiceHostDeps,
 } from '../src/audio/managerVoice.js';
 import {
   CHAT_STATUS_TOOL_NAME,
   FIND_CHATS_TOOL_NAME,
   PASS_TO_AGENT_TOOL_NAME,
+  SEND_TO_CHAT_TOOL_NAME,
 } from '../src/audio/voiceAgent.js';
 import {
   ChatLookupError,
@@ -68,26 +66,13 @@ const CHATS: ChatEntry[] = [
 
 function makeHost(overrides: Partial<ManagerVoiceHostDeps> = {}) {
   const notes: string[] = [];
-  const order: string[] = [];
-  const replies = new Map<string, { resolve: (s: string) => void; reject: (e: Error) => void }>();
   const deps: ManagerVoiceHostDeps = {
     logger,
-    now: () => NOW,
     lookup: createChatLookup({
       now: () => NOW,
       listChats: async () => CHATS,
       peekChat: async () => ({}),
     }),
-    deliver: vi.fn(async ({ chatId, localId }) => {
-      order.push(`deliver:${chatId}:${localId.startsWith('manager-voice-')}`);
-    }),
-    awaitReply: vi.fn(
-      ({ chatId }: { chatId: string; localId: string }) =>
-        new Promise<string>((resolve, reject) => {
-          order.push(`await:${chatId}`);
-          replies.set(chatId, { resolve, reject });
-        }),
-    ),
     addTask: vi.fn(async ({ content }) => `Added "${content}".`),
     listTasks: vi.fn(async () => [
       { id: 't1', content: 'salt' },
@@ -102,7 +87,7 @@ function makeHost(overrides: Partial<ManagerVoiceHostDeps> = {}) {
     recordNote: (line) => notes.push(line),
     ...overrides,
   };
-  return { deps, notes, order, replies, tools: createManagerVoiceTools(deps) };
+  return { deps, notes, tools: createManagerVoiceTools(deps) };
 }
 
 describe('timer tools', () => {
@@ -160,156 +145,32 @@ describe('isManagerCall', () => {
   });
 });
 
-describe('send_to_chat', () => {
-  test('delivers, then waits for the reply to that message by its id, and records both', async () => {
-    const { tools, notes, order, replies, deps } = makeHost();
-    const accepted = vi.fn();
-    const p = tools.sendToChat({
-      chat: 'garden',
-      message: 'use ferns in the north bed',
-      onAccepted: accepted,
-    });
-    await vi.waitFor(() => expect(accepted).toHaveBeenCalled());
-    expect(order).toEqual(['deliver:c-garden:true', 'await:c-garden']);
-    expect(accepted).toHaveBeenCalledWith({ name: 'Garden planning' });
-    const sent = vi.mocked(deps.deliver).mock.calls[0]![0];
-    const awaited = vi.mocked(deps.awaitReply).mock.calls[0]![0];
-    expect(awaited).toEqual({ chatId: 'c-garden', localId: sent.localId });
-    expect(sent.message).toBe('use ferns in the north bed');
-    expect(notes).toEqual(['-> "Garden planning": use ferns in the north bed']);
-    replies.get('c-garden')!.resolve('Done, ferns are in the plan.');
-    await expect(p).resolves.toEqual({
-      name: 'Garden planning',
-      reply: 'Done, ferns are in the plan.',
-    });
-    expect(notes[1]).toBe('<- "Garden planning": Done, ferns are in the plan.');
-  });
-
-  test('a second message to a chat still answering the first is refused, not lost', async () => {
-    const { tools, replies, deps } = makeHost();
-    const first = tools.sendToChat({ chat: 'garden', message: 'one' });
-    await vi.waitFor(() => expect(replies.has('c-garden')).toBe(true));
-    await expect(tools.sendToChat({ chat: 'garden', message: 'two' })).rejects.toBeInstanceOf(
-      ChatLookupError,
-    );
-    replies.get('c-garden')!.resolve('ok');
-    await first;
-    replies.delete('c-garden');
-    // Once answered, the chat can be sent to again.
-    const third = tools.sendToChat({ chat: 'garden', message: 'three' });
-    await vi.waitFor(() => expect(replies.get('c-garden')).toBeDefined());
-    replies.get('c-garden')!.resolve('ok again');
-    await expect(third).resolves.toMatchObject({ reply: 'ok again' });
-    expect(deps.deliver).toHaveBeenCalledTimes(2);
-  });
-
-  test('a message the chat never took fails loudly, waits for nothing and records nothing', async () => {
-    const { tools, notes, deps } = makeHost({
-      deliver: vi.fn(async () => {
-        throw new Error('chat is moving');
-      }),
-    });
-    const accepted = vi.fn();
-    await expect(
-      tools.sendToChat({ chat: 'garden', message: 'x', onAccepted: accepted }),
-    ).rejects.toThrow('chat is moving');
-    expect(accepted).not.toHaveBeenCalled();
-    expect(deps.awaitReply).not.toHaveBeenCalled();
-    expect(notes).toEqual([]);
-    // Not left marked as waiting: the next message goes.
-    await expect(tools.sendToChat({ chat: 'garden', message: 'y' })).rejects.toThrow(
-      'chat is moving',
-    );
-    expect(deps.deliver).toHaveBeenCalledTimes(2);
-  });
-
-  test('a chat whose turn fails is recorded as failed in the Manager chat', async () => {
-    const { tools, notes, replies } = makeHost();
-    const p = tools.sendToChat({ chat: 'garden', message: 'x' });
-    await vi.waitFor(() => expect(notes).toHaveLength(1));
-    replies.get('c-garden')!.reject(new Error('rate limited'));
-    await expect(p).rejects.toThrow('rate limited');
-    expect(notes[1]).toBe('<- "Garden planning": failed: rate limited');
-  });
-
-  test('a chat on another host is sent to the same way, and its reply comes back into the call', async () => {
-    const { tools, notes, deps, replies } = makeHost();
-    const accepted = vi.fn();
-    const p = tools.sendToChat({
-      chat: 'laptop build',
-      message: 'run the tests',
-      onAccepted: accepted,
-    });
-    await vi.waitFor(() => expect(replies.has('c-remote')).toBe(true));
-    const sent = vi.mocked(deps.deliver).mock.calls[0]![0];
-    expect(sent).toMatchObject({ chatId: 'c-remote', message: 'run the tests' });
-    expect(vi.mocked(deps.awaitReply).mock.calls[0]![0]).toEqual({
-      chatId: 'c-remote',
-      localId: sent.localId,
-    });
-    expect(accepted).toHaveBeenCalledWith({ name: 'Laptop build' });
-    replies.get('c-remote')!.resolve('All 212 tests pass.');
-    await expect(p).resolves.toEqual({ name: 'Laptop build', reply: 'All 212 tests pass.' });
-    expect(notes).toEqual([
-      '-> "Laptop build": run the tests',
-      '<- "Laptop build": All 212 tests pass.',
-    ]);
-  });
-
-  test('an archived chat is sent to like any other, and the Manager chat says it comes back', async () => {
-    const { tools, notes, deps, replies } = makeHost();
-    const p = tools.sendToChat({ chat: 'old thing', message: 'pick this up again' });
-    await vi.waitFor(() => expect(replies.has('c-old')).toBe(true));
-    expect(vi.mocked(deps.deliver).mock.calls[0]![0]).toMatchObject({
-      chatId: 'c-old',
-      message: 'pick this up again',
-    });
-    expect(notes[0]).toBe('-> "Old thing" (was archived; this brings it back): pick this up again');
-    replies.get('c-old')!.resolve('Back on it.');
-    await expect(p).resolves.toEqual({ name: 'Old thing', reply: 'Back on it.' });
-  });
-
-  test('an ambiguous name sends nothing', async () => {
-    const { tools, deps } = makeHost();
-    await expect(tools.sendToChat({ chat: 'bus', message: 'x' })).rejects.toBeInstanceOf(
-      ChatLookupError,
-    );
-    expect(deps.deliver).not.toHaveBeenCalled();
-    expect(deps.awaitReply).not.toHaveBeenCalled();
-  });
-});
-
 describe('prompts', () => {
   test('the Manager instruction names its tools and never the hand-off tool', () => {
-    for (const asyncResult of [true, false]) {
-      const text = managerHostedInstruction(asyncResult);
-      expect(text).toContain(SEND_TO_CHAT_TOOL_NAME);
-      expect(text).toContain(FIND_CHATS_TOOL_NAME);
-      expect(text).toContain(CHAT_STATUS_TOOL_NAME);
-      expect(text).not.toContain(PASS_TO_AGENT_TOOL_NAME);
-    }
-    expect(managerHostedInstruction(true)).toContain('arrives as a message');
-    expect(managerHostedInstruction(true)).toMatch(/only a receipt[^.]*say nothing/i);
-    expect(managerHostedInstruction(false)).toContain('returns once the chat has answered');
+    const text = managerHostedInstruction();
+    expect(text).toContain(SEND_TO_CHAT_TOOL_NAME);
+    expect(text).toContain(FIND_CHATS_TOOL_NAME);
+    expect(text).toContain(CHAT_STATUS_TOOL_NAME);
+    expect(text).not.toContain(PASS_TO_AGENT_TOOL_NAME);
+    expect(text).toContain('arrives as a message');
+    expect(text).toMatch(/only a receipt[^.]*say nothing/i);
   });
 
   test('the account’s voice prompt replaces the built-in one; the tool rules stay', () => {
     const custom = 'You are my assistant. Answer questions yourself when you can.';
-    for (const asyncResult of [true, false]) {
-      const text = managerHostedInstruction(asyncResult, custom);
-      expect(text.startsWith(custom)).toBe(true);
-      expect(text).not.toContain('You are the Manager');
-      expect(text).toContain(SEND_TO_CHAT_TOOL_NAME);
-    }
+    const text = managerHostedInstruction(custom);
+    expect(text.startsWith(custom)).toBe(true);
+    expect(text).not.toContain('You are the Manager');
+    expect(text).toContain(SEND_TO_CHAT_TOOL_NAME);
     // Blank falls back to the built-in text rather than leaving the voice with no identity.
-    expect(managerHostedInstruction(false, '  ')).toContain('You are the Manager');
+    expect(managerHostedInstruction('  ')).toContain('You are the Manager');
   });
 
   test('the acknowledgement before a hand-off varies and is skipped when the answer is quick', () => {
     expect(ACKNOWLEDGEMENT_RULE).toMatch(/vary/);
     expect(ACKNOWLEDGEMENT_RULE).toMatch(/Skip it when the answer will be quick/);
     expect(ACKNOWLEDGEMENT_RULE).toMatch(/not always "one sec"/);
-    expect(managerHostedInstruction(true)).toContain(ACKNOWLEDGEMENT_RULE);
+    expect(managerHostedInstruction()).toContain(ACKNOWLEDGEMENT_RULE);
   });
 });
 

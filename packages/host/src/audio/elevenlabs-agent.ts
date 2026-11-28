@@ -70,12 +70,7 @@ import {
   managerHostedInstruction,
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
-  MANAGER_TOOL_NAMES,
   stringArgs,
-  MANAGER_TOOL_PARAMS,
-  RESULT_GIST_NOTE,
-  SEND_TO_CHAT_BLOCKING_DESCRIPTION,
-  SEND_TO_CHAT_TOOL_NAME,
   type ManagerVoiceTools,
 } from './managerVoice.js';
 
@@ -369,10 +364,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     if (manager) {
       // A Manager call (spec/07 § A call to the Manager): its own tools, no agent behind it.
       tools.push(
-        this.clientTool(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_BLOCKING_DESCRIPTION, {
-          chat: MANAGER_TOOL_PARAMS.chat,
-          message: MANAGER_TOOL_PARAMS.message,
-        }),
         ...MANAGER_QUICK_TOOLS.map((t) =>
           this.clientTool(t.name, t.description, t.params, t.required),
         ),
@@ -387,7 +378,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     }
     const prompt = voiceAgentInstructions({
       instructions: manager
-        ? managerHostedInstruction(false, manager.voicePrompt?.())
+        ? managerHostedInstruction(manager.voicePrompt?.())
         : this.deps.instructions,
       extra: this.deps.spokenAloud ? [this.deps.spokenAloud] : [],
       ...(this.deps.tone !== undefined ? { tone: this.deps.tone } : {}),
@@ -624,7 +615,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       case 'client_tool_call': {
         const call = ev.client_tool_call ?? {};
         if (!call.tool_call_id) return;
-        if (this.deps.manager && call.tool_name && MANAGER_TOOL_NAMES.has(call.tool_name)) {
+        if (this.deps.manager && call.tool_name && MANAGER_QUICK_TOOL_NAMES.has(call.tool_name)) {
           void this.handleManagerTool(
             this.deps.manager,
             call.tool_call_id,
@@ -814,9 +805,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   }
 
   /**
-   * A Manager call's tools (spec/07 § A call to the Manager). The agent waits
-   * for each answer — for `send_to_chat`, until the chat has replied — the same
-   * way it waits on `dispatch_to_patch`.
+   * A Manager call's own quick tools (spec/07 § A call to the Manager), answered at once.
    */
   private async handleManagerTool(
     manager: ManagerVoiceTools,
@@ -828,21 +817,10 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       { sessionId: this.init.sessionId, tool: name, params },
       'elevenlabs-agent: manager tool',
     );
-    const arg = (k: string): string =>
-      typeof params === 'object' &&
-      params !== null &&
-      typeof (params as Record<string, unknown>)[k] === 'string'
-        ? ((params as Record<string, unknown>)[k] as string)
-        : '';
     let result: string;
     let isError = false;
     try {
-      if (MANAGER_QUICK_TOOL_NAMES.has(name))
-        result = await manager.quick(name, stringArgs(params), this.quickContext());
-      else {
-        const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
-        result = `${RESULT_GIST_NOTE}"${sent.name}" replied: ${sent.reply}`;
-      }
+      result = await manager.quick(name, stringArgs(params), this.quickContext());
     } catch (err) {
       result = (err as Error).message;
       if (!(err instanceof ChatLookupError)) {

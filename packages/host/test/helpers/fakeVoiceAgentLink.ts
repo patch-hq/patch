@@ -2,7 +2,12 @@
 // tools asked the host for, and answers with fixed text.
 
 import { vi } from 'vitest';
-import type { StartContext, SwitchOutcome, VoiceAgentLink } from '../../src/audio/voiceAgent.js';
+import type {
+  SendToChatOutcome,
+  StartContext,
+  SwitchOutcome,
+  VoiceAgentLink,
+} from '../../src/audio/voiceAgent.js';
 
 export const FAKE_START_CONTEXT =
   'THE CHAT AS IT STANDS\nChat: Train times\nUser: what time is my train';
@@ -12,6 +17,7 @@ export function fakeVoiceAgentLink(
     startContext?: () => StartContext;
     switchChat?: () => Promise<SwitchOutcome>;
     passToAgent?: VoiceAgentLink['passToAgent'];
+    sendToChat?: VoiceAgentLink['sendToChat'];
   } = {},
 ): {
   link: VoiceAgentLink;
@@ -45,6 +51,13 @@ export function fakeVoiceAgentLink(
       calls.push(`chatStatus:${chatId}:${chat}`);
       return 'Where it stands: drafting';
     }),
+    sendToChat: vi.fn(
+      opts.sendToChat ??
+        (async (req): Promise<SendToChatOutcome> => {
+          calls.push(`send:${req.chatId}:${req.chat}:${req.message}`);
+          return { ok: true, name: 'Garden planning', reply: new Promise<string>(() => {}) };
+        }),
+    ),
     answerPermission: vi.fn((chatId: string, words: string) => {
       calls.push(`permission:${chatId}:${words}`);
       return false;

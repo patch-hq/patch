@@ -33,10 +33,17 @@ import {
   type StartContext,
   type StartFacts,
   type StartMessage,
+  type SendToChatOutcome,
   type SwitchOutcome,
   type VoiceAgentLink,
 } from './voiceAgent.js';
-import { ChatLookupError, MANAGER_CHAT_ID, type ChatEntry, type ChatLookup } from './chatLookup.js';
+import {
+  ChatLookupError,
+  MANAGER_CHAT_ID,
+  displayName,
+  type ChatEntry,
+  type ChatLookup,
+} from './chatLookup.js';
 
 /** How a spoken turn is tagged in the chat: its ingress, and whether the voice agent handed it off. */
 export function voiceTag(source: VoiceTurnSource, handoff: boolean): string {
@@ -159,6 +166,15 @@ export function createChatVoice(deps: {
   catchUp?: (chatId: string, earlier: StartMessage[]) => Promise<string>;
   /** Finding, reading and naming the account's chats: find chats, chat status and switch chat. */
   lookup: ChatLookup;
+  /** Deliver a message as `patch_send_to` does; resolves once the chat has it. */
+  deliver: (req: {
+    callerChatId: string;
+    chatId: string;
+    message: string;
+    localId: string;
+  }) => Promise<void>;
+  /** The chat's reply to the message delivered as `localId`, read by the server from its record. */
+  awaitReply: (req: { callerChatId: string; chatId: string; localId: string }) => Promise<string>;
   /** True when `chatId` lives on this host. */
   isLocal?: (chatId: string) => boolean;
   /** Hang an open call up as the agent ending it: ended sound, bar cleared, no redial. */
@@ -184,6 +200,16 @@ export function createChatVoice(deps: {
     let c = chats.get(chatId);
     if (!c) chats.set(chatId, (c = { handoffs: new Map(), replySeqs: [] }));
     return c;
+  };
+  /** Sends out and not yet answered, by calling chat and target: a second would cut the first off. */
+  const awaitingReply = new Set<string>();
+  /** A quiet line in the calling chat; a chat that cannot take it is logged, not fatal. */
+  const note = (chatId: string, line: string): void => {
+    try {
+      daemon.recordCallNote(chatId, line);
+    } catch (err) {
+      logger.error({ chatId, err: (err as Error).message }, 'voice: could not write a call note');
+    }
   };
   /** The chat each open call started on: a hand-off made after a switch says where from. */
   const callChats = new Map<string, string>();
@@ -440,6 +466,61 @@ export function createChatVoice(deps: {
 
     findChats(chatId, query) {
       return deps.lookup.findChats(query, chatId);
+    },
+
+    async sendToChat({ chatId, chat, message }): Promise<SendToChatOutcome> {
+      let target: ChatEntry;
+      try {
+        target = await deps.lookup.resolve(chat, chatId);
+      } catch (err) {
+        if (err instanceof ChatLookupError) return { ok: false, message: err.message };
+        throw err;
+      }
+      const name = displayName(target);
+      if (message.trim() === '') return { ok: false, message: 'Say what to tell the chat.' };
+      if (target.chatId === chatId) {
+        return {
+          ok: false,
+          message: `"${name}" is this call's own chat: pass it to the chat's agent instead.`,
+        };
+      }
+      const key = `${chatId}\u0000${target.chatId}`;
+      if (awaitingReply.has(key)) {
+        return {
+          ok: false,
+          message: `"${name}" has not answered the last message yet. Tell the user, and send this once it has.`,
+        };
+      }
+      const localId = `voice-send-${now()}-${randomUUID().slice(0, 8)}`;
+      awaitingReply.add(key);
+      try {
+        await deps.deliver({ callerChatId: chatId, chatId: target.chatId, message, localId });
+      } catch (err) {
+        awaitingReply.delete(key);
+        throw err;
+      }
+      note(
+        chatId,
+        target.status === 'archived'
+          ? `-> "${name}" (was archived; this brings it back): ${message}`
+          : `-> "${name}": ${message}`,
+      );
+      // Read from the server's record by the message's own id, so it is this
+      // message's reply even when the chat was busy and took it later.
+      const reply = deps
+        .awaitReply({ callerChatId: chatId, chatId: target.chatId, localId })
+        .then(
+          (text) => {
+            note(chatId, `<- "${name}": ${text.trim() === '' ? '(no reply text)' : text.trim()}`);
+            return text;
+          },
+          (err: Error) => {
+            note(chatId, `<- "${name}": failed: ${err.message}`);
+            throw err;
+          },
+        )
+        .finally(() => awaitingReply.delete(key));
+      return { ok: true, name, reply };
     },
 
     chatStatus(chatId, chat) {

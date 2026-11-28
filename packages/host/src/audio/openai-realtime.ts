@@ -79,6 +79,7 @@ import {
 import type { VoiceSessionLike } from './voice-session-like.js';
 import {
   PASS_TO_AGENT_TOOL_NAME,
+  SEND_TO_CHAT_TOOL_NAME,
   SWITCH_CHAT_TOOL_NAME,
   voiceAgentInstructions,
   voiceAgentTools,
@@ -91,11 +92,7 @@ import {
   managerHostedInstruction,
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
-  MANAGER_TOOL_NAMES,
   stringArgs,
-  MANAGER_TOOL_PARAMS,
-  SEND_TO_CHAT_BLOCKING_DESCRIPTION,
-  SEND_TO_CHAT_TOOL_NAME,
   type ManagerVoiceTools,
 } from './managerVoice.js';
 
@@ -404,7 +401,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     if (this.gate) extra.push(speakerInstruction(this.speaker));
     return voiceAgentInstructions({
       instructions: this.deps.manager
-        ? managerHostedInstruction(false, this.deps.manager.voicePrompt?.())
+        ? managerHostedInstruction(this.deps.manager.voicePrompt?.())
         : this.deps.instructions,
       extra,
       ...(this.deps.tone !== undefined ? { tone: this.deps.tone } : {}),
@@ -668,7 +665,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
         return;
       }
       case 'response.function_call_arguments.done':
-        if (this.deps.manager && ev.call_id && ev.name && MANAGER_TOOL_NAMES.has(ev.name)) {
+        if (this.deps.manager && ev.call_id && ev.name && MANAGER_QUICK_TOOL_NAMES.has(ev.name)) {
           this.responseHadToolCall = true;
           void this.handleManagerTool(this.deps.manager, ev.call_id, ev.name, ev.arguments ?? '{}');
         }
@@ -947,7 +944,11 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       /* the tool reports the missing arguments itself */
     }
     let result: string;
-    if (name === PASS_TO_AGENT_TOOL_NAME || name === SWITCH_CHAT_TOOL_NAME) {
+    if (
+      name === PASS_TO_AGENT_TOOL_NAME ||
+      name === SEND_TO_CHAT_TOOL_NAME ||
+      name === SWITCH_CHAT_TOOL_NAME
+    ) {
       // The chat reads in order: what the user said, what the voice said, then the hand-off.
       this.finishReply();
     }
@@ -983,9 +984,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   }
 
   /**
-   * A Manager call's tools (spec/07 § A call to the Manager). The call stays
-   * open until the tool has its answer — for `send_to_chat`, until the chat
-   * has replied — the same way `dispatch_to_patch` does on this engine.
+   * A Manager call's own quick tools (spec/07 § A call to the Manager), answered at once.
    */
   private async handleManagerTool(
     manager: ManagerVoiceTools,
@@ -999,24 +998,16 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     } catch {
       /* the tool reports the missing arguments itself */
     }
-    const arg = (k: string): string => (typeof args[k] === 'string' ? (args[k] as string) : '');
-    const isSend = name === SEND_TO_CHAT_TOOL_NAME;
     this.deps.logger.info(
       { sessionId: this.init.sessionId, tool: name, args },
       'openai-realtime: manager tool',
     );
     let result: string;
     try {
-      if (MANAGER_QUICK_TOOL_NAMES.has(name))
-        result = await manager.quick(name, stringArgs(args), this.quickContext());
-      else {
-        const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
-        result = `"${sent.name}" replied: ${sent.reply}`;
-      }
+      result = await manager.quick(name, stringArgs(args), this.quickContext());
     } catch (err) {
       const reason = (err as Error).message;
-      result =
-        isSend && !(err instanceof ChatLookupError) ? `Not sent or failed: ${reason}` : reason;
+      result = reason;
       if (!(err instanceof ChatLookupError)) {
         this.reportError(`${name} failed: ${reason}`);
       }
@@ -1105,13 +1096,7 @@ function managerRealtimeTools(): Array<Record<string, unknown>> {
       required,
     },
   });
-  return [
-    fn(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_BLOCKING_DESCRIPTION, {
-      chat: MANAGER_TOOL_PARAMS.chat,
-      message: MANAGER_TOOL_PARAMS.message,
-    }),
-    ...MANAGER_QUICK_TOOLS.map((t) => fn(t.name, t.description, t.params, t.required)),
-  ];
+  return [...MANAGER_QUICK_TOOLS.map((t) => fn(t.name, t.description, t.params, t.required))];
 }
 
 /** One of the voice agent's tools in Realtime's function shape. */
