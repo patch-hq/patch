@@ -25,6 +25,7 @@ import { api, ApiError, type CrashReport } from '../api/rest';
 import { store } from './credential';
 import { mobileBuildInfo } from './buildInfo';
 import { useUiStore } from '../stores/uiStore';
+import { startStallWatchdog } from './stallWatchdog';
 import { beginSession, logExit, noteCrashed, telemetryEnabled, trackSession } from './exitLog';
 
 const PENDING_KEY = 'patch.crash.pending';
@@ -192,6 +193,7 @@ export function startCrashCapture(): void {
     }
     const launch = beginSession(Date.now(), crash !== null);
     trackSession();
+    startStallWatchdog();
     if (crash) await reportNativeCrash(crash);
     if (launch.unexplained && launch.entry) await recordExit(launch.entry.detail, launch.entry.at);
   })();

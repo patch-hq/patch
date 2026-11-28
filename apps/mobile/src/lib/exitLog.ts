@@ -24,7 +24,7 @@ const SHARE_KEY = 'patch.shareCrashReports.v1';
 const MAX_ENTRIES = 100;
 const HEARTBEAT_MS = 30_000;
 
-export type ExitKind = 'crash' | 'unexpected-exit' | 'restart' | 'updated' | 'closed';
+export type ExitKind = 'crash' | 'unexpected-exit' | 'restart' | 'updated' | 'closed' | 'stall';
 
 export interface ExitEntry {
   at: number;
@@ -41,6 +41,8 @@ interface Session {
   updateId: string | null;
   /** Set when the session ended for a reason we already know. */
   endedBy?: 'crash' | 'restart';
+  /** What the app was showing and doing, kept current by the stall watchdog. */
+  context?: string;
 }
 
 /** Off by default: nothing is sent anywhere until the user turns this on. */
@@ -108,6 +110,11 @@ function currentBuild(): string {
   return `${info.version}${info.gitSha ? `+${info.gitSha}` : ''}`;
 }
 
+/** Remember what the app is doing, so an exit we only find later can say. */
+export function noteContext(context: string): void {
+  if (readSession()) writeSession({ context });
+}
+
 /** The user pressed a restart (Updates.reloadAsync): that ending is expected. */
 export function noteIntentionalRestart(): void {
   logExit('restart', 'restarted from Settings to apply an update');
@@ -152,7 +159,7 @@ export function beginSession(now = Date.now(), previousCrashedNatively = false):
       finding = {
         entry: logExit(
           'unexpected-exit',
-          `stopped while open, no crash recorded; last seen ${since}s before relaunch`,
+          `stopped while open, no crash recorded; last seen ${since}s before relaunch${previous.context ? `; last context: ${previous.context}` : ''}`,
           now,
         ),
         unexplained: true,
