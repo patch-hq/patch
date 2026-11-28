@@ -14,12 +14,6 @@ import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesS
 import * as voiceController from '../lib/voiceController.js';
 import type { AudioSessionMode } from '@patch/wire/audio';
 
-// The bar is under test, not the sounds: they have no browser audio here.
-vi.mock('../lib/callSound.js', () => ({
-  syncCallSoundLoop: vi.fn(),
-  playCallSound: vi.fn(),
-}));
-
 function base(mode: AudioSessionMode) {
   return {
     chatId: 'thread_manager',

@@ -6,6 +6,13 @@ import { cleanup, configure } from '@testing-library/react';
 import { useUiStore } from '../stores/uiStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 
+// The call's sounds need browser audio that jsdom does not have. Tests of a call
+// run without them; callSound.test.ts unmocks this to test the player itself.
+vi.mock('../lib/callSound.js', () => ({
+  syncCallSoundLoop: vi.fn(),
+  playCallSound: vi.fn(),
+}));
+
 // Testing Library gives `waitFor` one second by default, which is a statement
 // about how fast the host is rather than about the behaviour under test. On
 // a shared box running a queue of agents the render this suite is waiting on

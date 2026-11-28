@@ -10,6 +10,8 @@ import {
 } from '../lib/callSound.js';
 import { CALL_SOUNDS, CALL_SOUND_NAMES } from '../lib/callSoundSynth.js';
 
+vi.unmock('../lib/callSound.js');
+
 // A recording stand-in for WebAudio: enough of the node graph to see which
 // notes a sound schedules and when.
 function fakeAudio() {

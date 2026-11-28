@@ -18,12 +18,6 @@ import type {
   OpenAudioSessionOpts,
 } from '../lib/audioSession.js';
 
-// The call's sounds have no browser audio here.
-vi.mock('../lib/callSound.js', () => ({
-  syncCallSoundLoop: vi.fn(),
-  playCallSound: vi.fn(),
-}));
-
 let lastCallbacks: AudioSessionCallbacks | undefined;
 let lastOpts: OpenAudioSessionOpts | undefined;
 const modeSpy = vi.fn();
