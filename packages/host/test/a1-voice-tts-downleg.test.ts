@@ -25,7 +25,12 @@ import pino from 'pino';
 import { createHmac } from 'node:crypto';
 import { WebSocket } from 'ws';
 import type { WireEvent } from '@patch/wire';
-import { encodeAudio, decodeAudio, type AudioEvent } from '@patch/wire/audio';
+import {
+  encodeAudio,
+  decodeAudio,
+  HEARTBEAT_INTERVAL_MS,
+  type AudioEvent,
+} from '@patch/wire/audio';
 import { startAudioServer, type AudioServerHandle } from '../src/audio/server.js';
 import { createVoiceReplyBridge } from '../src/audio/replyBridge.js';
 import { createWhisper, type WhisperBackend } from '../src/audio/whisper.js';
@@ -278,6 +283,14 @@ interface Frame {
 }
 
 function record(ws: WebSocket, frames: Frame[]): void {
+  // A live surface always has something to send, and the host drops a peer it
+  // hears nothing from for HEARTBEAT_LOST_AFTER_MS: this peer waits several
+  // seconds on the greeting, so it says it is there, as a surface does.
+  const alive = setInterval(() => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    ws.send(encodeAudio({ type: 'audio.heartbeat', sessionId: 'alive', n: 0 }));
+  }, HEARTBEAT_INTERVAL_MS);
+  ws.once('close', () => clearInterval(alive));
   ws.on('message', (data: Buffer | string, isBinary: boolean) => {
     if (isBinary) {
       frames.push({ binary: true, bytes: (data as Buffer).byteLength });
