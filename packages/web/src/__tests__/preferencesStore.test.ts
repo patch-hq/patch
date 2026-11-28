@@ -2,7 +2,7 @@
 // that landed while it was in flight.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { SharedState } from '../api/rest.js';
+import type { AccountPreferences, SharedState } from '../api/rest.js';
 
 const settings = vi.fn();
 const setPreferences = vi.fn();
@@ -67,5 +67,60 @@ describe('preferencesStore.update', () => {
     setPreferences.mockResolvedValueOnce({ preferences });
     await usePreferencesStore.getState().update({ meetingTranscriptionModel: 'x' });
     expect(usePreferencesStore.getState().preferences.meetingTranscriptionModel).toBe('x');
+  });
+
+  it('accepts a nested voiceAgent the server returns in its own key order', async () => {
+    const sent = {
+      setups: {
+        elevenlabs: {
+          sound: {
+            stability: 0.7,
+            similarity: 0.8,
+            speed: 0.95,
+            expressive: true,
+            eagerness: 'patient',
+          },
+          voice: 'adam',
+          model: 'claude-sonnet-5-5',
+        },
+        gemini: { sound: {}, model: 'g' },
+        openai: { sound: {}, model: 'o' },
+      },
+      provider: 'elevenlabs',
+    } as unknown as AccountPreferences['voiceAgent'];
+    const returned = {
+      provider: 'elevenlabs',
+      setups: {
+        gemini: { model: 'g', sound: {} },
+        openai: { model: 'o', sound: {} },
+        elevenlabs: {
+          model: 'claude-sonnet-5-5',
+          voice: 'adam',
+          sound: {
+            eagerness: 'patient',
+            expressive: true,
+            speed: 0.95,
+            similarity: 0.8,
+            stability: 0.7,
+          },
+        },
+      },
+    } as unknown as AccountPreferences['voiceAgent'];
+    setPreferences.mockResolvedValueOnce({
+      preferences: { ...DEFAULT_PREFERENCES, voiceAgent: returned },
+    });
+    await usePreferencesStore.getState().update({ voiceAgent: sent });
+    expect(usePreferencesStore.getState().preferences.voiceAgent).toEqual(returned);
+  });
+
+  it('still rejects a voiceAgent whose value changed', async () => {
+    const sent = { provider: 'elevenlabs', setups: { a: { sound: { speed: 0.95 } } } };
+    const got = { provider: 'elevenlabs', setups: { a: { sound: { speed: 1 } } } };
+    setPreferences.mockResolvedValueOnce({
+      preferences: { ...DEFAULT_PREFERENCES, voiceAgent: got },
+    });
+    await expect(
+      usePreferencesStore.getState().update({ voiceAgent: sent } as never),
+    ).rejects.toThrow('did not save voiceAgent');
   });
 });
