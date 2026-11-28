@@ -222,13 +222,23 @@ describe('pause when quiet', () => {
     vi.useFakeTimers();
     prefs.quiet = 5;
     await live();
-    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    // The host keeps heartbeating a quiet call: the line stays up for the whole wait.
+    let n = 0;
+    const quietFor = async (ms: number): Promise<void> => {
+      for (let t = 0; t < ms; t += 1_000) {
+        FakeCallTransport.last().emitMessage(
+          JSON.stringify({ type: 'audio.heartbeat', sessionId: 'sess-1', n: n++ }),
+        );
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+    };
+    await quietFor(4 * 60_000);
     FakeCallTransport.last().emitMessage(
       JSON.stringify({ type: 'audio.transcript_partial', sessionId: 'sess-1', text: 'hm' }),
     );
-    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    await quietFor(4 * 60_000);
     expect(useVoiceStore.getState().callPaused).toBeNull();
-    await vi.advanceTimersByTimeAsync(60_000);
+    await quietFor(60_000);
     expect(useVoiceStore.getState().callPaused).toBe('quiet');
   });
 

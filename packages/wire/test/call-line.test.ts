@@ -4,7 +4,7 @@
 import { describe, expect, test, beforeEach } from 'vitest';
 import {
   CALL_ACK_TIMEOUT_MS,
-  CALL_REDIAL_DELAYS_MS,
+  CALL_RESUME_DELAYS_MS,
   CallLine,
   type CallLineClock,
   type CallLinePhase,
@@ -12,6 +12,7 @@ import {
 } from '../src/call-line.js';
 import {
   CALL_LOG_MAX_ENTRIES,
+  CALL_RESUME_WINDOW_MS,
   HEARTBEAT_LOST_AFTER_MS,
   heartbeatEcho,
   type AudioCallLogEvent,
@@ -56,11 +57,7 @@ class Surface implements CallLineSurface {
   hungUp: number[] = [];
   sent: Array<{ attempt: number; frame: AudioHeartbeatEvent | AudioCallLogEvent }> = [];
   phases: Array<{ next: CallLinePhase; prev: CallLinePhase; reason?: string }> = [];
-  tries: string[] = [];
   open = true;
-  stillTrying(reason: string): void {
-    this.tries.push(reason);
-  }
   dial(attempt: number, resumes: string | null): void {
     this.dials.push({ attempt, resumes });
   }
@@ -144,7 +141,7 @@ describe('a dropped call comes back', () => {
     live();
     line.lost(1, 'connection_closed', 'the audio connection closed');
     expect(line.phase).toBe('reconnecting');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]! - 1);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]! - 1);
     expect(surface.dials).toHaveLength(1);
     clock.advance(1);
     expect(surface.dials.at(-1)).toEqual({ attempt: 2, resumes: 's1' });
@@ -153,71 +150,105 @@ describe('a dropped call comes back', () => {
     expect(surface.phases.at(-1)?.prev).toBe('reconnecting');
   });
 
-  test('a redial that fails tries again on the next delay, then keeps trying, saying so once', () => {
+  test('a resume that fails tries again on the next delay, then keeps trying until the window runs out', () => {
     live();
     line.lost(1, 'host_unreachable', 'host gone');
     let attempt = 1;
-    for (const delay of CALL_REDIAL_DELAYS_MS) {
+    for (const delay of CALL_RESUME_DELAYS_MS) {
       clock.advance(delay);
       attempt += 1;
       expect(surface.dials.at(-1)).toEqual({ attempt, resumes: 's1' });
       line.lost(attempt, 'connection_closed', 'still down');
     }
-    expect(surface.tries).toEqual(['still down']);
-    const last = CALL_REDIAL_DELAYS_MS.at(-1)!;
+    const last = CALL_RESUME_DELAYS_MS.at(-1)!;
     clock.advance(last);
-    line.lost(attempt + 1, 'connection_closed', 'still down');
-    clock.advance(last);
-    expect(surface.dials).toHaveLength(CALL_REDIAL_DELAYS_MS.length + 3);
-    expect(surface.tries).toHaveLength(1);
+    expect(surface.dials.at(-1)).toMatchObject({ resumes: 's1' });
     expect(line.phase).toBe('reconnecting');
+  });
+
+  test('a call whose resume window runs out ends, and never opens a new session', () => {
+    live();
+    line.lost(1, 'connection_closed', 'closed');
+    let attempt = 1;
+    // Every attempt fails until the window is gone.
+    for (let waited = 0; waited < CALL_RESUME_WINDOW_MS && line.phase === 'reconnecting'; ) {
+      const delay = CALL_RESUME_DELAYS_MS[Math.min(attempt - 1, CALL_RESUME_DELAYS_MS.length - 1)]!;
+      clock.advance(delay);
+      waited += delay;
+      if (line.phase !== 'reconnecting') break;
+      attempt += 1;
+      line.lost(attempt, 'connection_closed', 'still down');
+    }
+    clock.advance(CALL_RESUME_WINDOW_MS);
+    expect(line.phase).toBe('ended');
+    expect(surface.phases.at(-1)).toEqual({ next: 'ended', prev: 'reconnecting' });
+    const dials = surface.dials.length;
+    // Nothing more is dialled, however long it waits, and every attempt after the first resumes.
+    clock.advance(10 * CALL_RESUME_WINDOW_MS);
+    expect(surface.dials).toHaveLength(dials);
+    expect(surface.dials.slice(1).every((d) => d.resumes === 's1')).toBe(true);
+    expect(clock.pending()).toBe(0);
+  });
+
+  test('the window running out hangs up an attempt still waiting on the host', () => {
+    live();
+    line.lost(1, 'connection_closed', 'closed');
+    clock.advance(CALL_RESUME_WINDOW_MS - 1_000);
+    line.lost(surface.dials.at(-1)!.attempt, 'connection_closed', 'still down');
+    // The next attempt starts, then the window closes on it mid-dial.
+    clock.advance(CALL_RESUME_DELAYS_MS.at(-1)!);
+    const inFlight = surface.dials.at(-1)!.attempt;
+    clock.advance(CALL_RESUME_WINDOW_MS);
+    expect(line.phase).toBe('ended');
+    expect(surface.hungUp).toContain(inFlight);
+  });
+
+  test('coming back before the window runs out cancels it', () => {
+    live();
+    line.lost(1, 'connection_closed', 'closed');
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
+    line.acked(2, 's1');
+    for (let n = 0; n < (2 * CALL_RESUME_WINDOW_MS) / 1_000; n++) {
+      line.heartbeat(2, hb(n, 's1'));
+      clock.advance(1_000);
+    }
+    expect(line.phase).toBe('live');
   });
 
   test('every redial names the session the call was last live on, however many fail', () => {
     live();
     line.lost(1, 'connection_closed', 'closed');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     line.lost(2, 'connection_closed', 'still down');
-    clock.advance(CALL_REDIAL_DELAYS_MS[1]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[1]!);
     expect(surface.dials.map((d) => d.resumes)).toEqual([null, 's1', 's1']);
     line.acked(3, 's3');
     line.lost(3, 'signal_lost', 'nothing from the host for 3006ms');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     expect(surface.dials.at(-1)?.resumes).toBe('s3');
   });
 
   test('a redial the host never answers is hung up and tried again', () => {
     live();
     line.lost(1, 'connection_closed', 'closed');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     clock.advance(CALL_ACK_TIMEOUT_MS);
     expect(surface.hungUp).toEqual([2]);
     expect(line.phase).toBe('reconnecting');
-    clock.advance(CALL_REDIAL_DELAYS_MS[1]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[1]!);
     expect(surface.dials.at(-1)).toEqual({ attempt: 3, resumes: 's1' });
   });
 
   test('the schedule starts again after the line comes back', () => {
     live();
     line.lost(1, 'connection_closed', 'closed');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     line.lost(2, 'connection_closed', 'closed');
-    clock.advance(CALL_REDIAL_DELAYS_MS[1]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[1]!);
     line.acked(3, 's3');
     line.lost(3, 'connection_closed', 'closed');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     expect(surface.dials.at(-1)).toEqual({ attempt: 4, resumes: 's3' });
-  });
-
-  test('coming back to the foreground redials at once', () => {
-    live();
-    line.foreground();
-    expect(surface.dials).toHaveLength(1);
-    line.lost(1, 'connection_closed', 'closed');
-    line.foreground();
-    expect(surface.dials.at(-1)).toEqual({ attempt: 2, resumes: 's1' });
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
-    expect(surface.dials).toHaveLength(2);
   });
 
   test('an attempt is lost once: the close after a heartbeat timeout is the same drop', () => {
@@ -227,14 +258,14 @@ describe('a dropped call comes back', () => {
     expect(surface.hungUp).toEqual([1]);
     line.lost(1, 'connection_closed', 'closed');
     expect(surface.phases.filter((p) => p.next === 'reconnecting')).toHaveLength(1);
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     expect(surface.dials).toHaveLength(2);
   });
 
   test('events from a replaced attempt change nothing', () => {
     live();
     line.lost(1, 'connection_closed', 'closed');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     line.acked(1, 's1');
     line.heartbeat(1, hb(1));
     line.fail(1, 'late error');
@@ -299,7 +330,7 @@ describe('the call log', () => {
     line.heartbeat(1, hb(4, 's1', 40)); // 2 and 3 never came
     clock.advance(HEARTBEAT_LOST_AFTER_MS);
     expect(surface.logs()).toEqual([]);
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     line.acked(2, 's2');
     const [log] = surface.logs();
     expect(log?.sessionId).toBe('s2');
@@ -325,7 +356,7 @@ describe('the call log', () => {
         kind: 'reconnected',
         at: expect.any(Number),
         sessionId: 's2',
-        downMs: CALL_REDIAL_DELAYS_MS[0],
+        downMs: CALL_RESUME_DELAYS_MS[0],
         attempts: 1,
       },
     ]);
@@ -338,7 +369,7 @@ describe('the call log', () => {
     live();
     clock.advance(1_000);
     line.lost(1, 'connection_closed', 'closed');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     line.acked(2, 's2');
     expect(surface.logs()[0]?.entries[1]).toMatchObject({
       kind: 'quality',
@@ -410,7 +441,7 @@ describe('the call log', () => {
     live();
     line.heartbeat(1, hb(0));
     line.lost(1, 'connection_closed', 'closed');
-    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     surface.open = false;
     line.acked(2, 's2');
     line.heartbeat(2, hb(0, 's2'));
@@ -448,7 +479,6 @@ describe('the call log', () => {
     expect(surface.logs()).toHaveLength(1);
     expect(surface.logs()[0]?.entries.map((e) => e.kind)).toEqual(['quality']);
     expect(clock.pending()).toBe(0);
-    line.foreground();
     line.lost(1, 'connection_closed', 'closed');
     expect(surface.dials).toHaveLength(1);
   });

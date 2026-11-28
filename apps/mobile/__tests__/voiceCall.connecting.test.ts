@@ -60,7 +60,8 @@ vi.mock('../src/lib/preferences', () => ({
   pauseWhenQuietMinutes: () => prefs.pauseWhenQuietMinutes,
 }));
 
-import { CALL_ACK_TIMEOUT_MS, CALL_REDIAL_DELAYS_MS } from '@patch/wire/call-line';
+import { CALL_ACK_TIMEOUT_MS, CALL_RESUME_DELAYS_MS } from '@patch/wire/call-line';
+import { CALL_RESUME_WINDOW_MS } from '@patch/wire/audio';
 import {
   endVoiceCall,
   retryVoiceCall,
@@ -244,7 +245,7 @@ describe('connecting → failed after the timeout', () => {
     expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
     expect(looping('reconnecting')).toBe(true);
     expect(looping('connecting')).toBe(false);
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]);
     await flush();
     // The redial is the same call: its timer still counts from the first connect.
     expect(useVoiceStore.getState().callConnectedAt).toBe(connectedAt);
@@ -304,7 +305,7 @@ describe('a dropped call says so', () => {
     sock.emitClose(1006);
     expect(useVoiceStore.getState().callError).toBeNull();
     expect(useVoiceStore.getState().callPhase).toBe('connecting');
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]);
     await flush();
     expect(FakeCallTransport.instances.length).toBe(before + 1);
     const again = FakeCallTransport.last();
@@ -322,7 +323,7 @@ describe('a dropped call says so', () => {
     sock.emitClose(1006, '', 'Connection reset');
     expect(useVoiceStore.getState().callError).toBeNull();
     expect(useVoiceStore.getState().callPhase).toBe('connecting');
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]);
     await flush();
     expect(FakeCallTransport.instances.length).toBe(before + 1);
   });
@@ -330,9 +331,9 @@ describe('a dropped call says so', () => {
   it('a redialled call that stays up gets its full attempts again on the next drop', async () => {
     startVoiceCall('c1');
     let sock = await liveCall();
-    for (let i = 0; i < CALL_REDIAL_DELAYS_MS.length + 1; i++) {
+    for (let i = 0; i < CALL_RESUME_DELAYS_MS.length + 1; i++) {
       sock.emitClose(1006);
-      vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
+      vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]);
       await flush();
       sock = FakeCallTransport.last();
       sock.emitOpen();
@@ -358,7 +359,7 @@ describe('a dropped call says so', () => {
     sock.emitClose(1011);
     expect(useVoiceStore.getState().callError).toBeNull();
     expect(useVoiceStore.getState().callPhase).toBe('connecting');
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]);
     await flush();
     expect(FakeCallTransport.instances.length).toBe(before + 1);
   });
@@ -369,7 +370,7 @@ describe('a dropped call says so', () => {
     const first = JSON.parse(String(sock.sent[0])) as { resumes?: string };
     expect(first.resumes).toBeUndefined();
     sock.emitClose(1006);
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]);
     await flush();
     const again = FakeCallTransport.last();
     again.emitOpen();
@@ -379,37 +380,43 @@ describe('a dropped call says so', () => {
     expect(start.resumes).toEqual(expect.any(String));
   });
 
-  it('keeps redialling for about two minutes, long enough to ride out a release', () => {
-    const total = CALL_REDIAL_DELAYS_MS.reduce((a, b) => a + b, 0);
-    expect(total).toBeGreaterThanOrEqual(90_000);
-  });
-
-  it('keeps redialling after the schedule runs out, saying once that it is still trying', async () => {
+  it('a call whose resume window runs out ends with the ended sound, and never dials a new session', async () => {
     startVoiceCall('c1');
     let sock = await liveCall();
     sock.emitClose(1006);
-    for (const delay of CALL_REDIAL_DELAYS_MS) {
+    // Every attempt fails until the window is gone.
+    for (let waited = 0; waited < CALL_RESUME_WINDOW_MS; ) {
+      const delay = CALL_RESUME_DELAYS_MS[0]!;
       vi.advanceTimersByTime(delay);
+      waited += delay;
       await flush();
       sock = FakeCallTransport.last();
       sock.emitClose(1006);
     }
-    expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
-    expect(useVoiceStore.getState().callPhase).toBe('connecting');
-    const before = FakeCallTransport.instances.length;
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[CALL_REDIAL_DELAYS_MS.length - 1]);
+    vi.advanceTimersByTime(CALL_RESUME_WINDOW_MS);
     await flush();
-    expect(FakeCallTransport.instances.length).toBe(before + 1);
+    expect(useVoiceStore.getState().activeSession).toBeNull();
+    expect(playCueMock).toHaveBeenCalledWith('ended');
+    const before = FakeCallTransport.instances.length;
+    vi.advanceTimersByTime(10 * CALL_RESUME_WINDOW_MS);
+    await flush();
+    expect(FakeCallTransport.instances.length).toBe(before);
+    // Every dial after the first named the session to resume, never a fresh one.
+    const starts = FakeCallTransport.instances
+      .map((t) => t.sent[0])
+      .filter((f) => f !== undefined)
+      .map((f) => JSON.parse(String(f)) as { resumes?: string });
+    expect(starts.slice(1).every((x) => typeof x.resumes === 'string')).toBe(true);
   });
 
-  it('opening the app redials at once instead of waiting out the backoff', async () => {
+  it('opening the app does not dial: only the resume schedule does', async () => {
     startVoiceCall('c1');
     const sock = await liveCall();
     sock.emitClose(1006);
     const before = FakeCallTransport.instances.length;
     __emitAppStateChange('active');
     await flush();
-    expect(FakeCallTransport.instances.length).toBe(before + 1);
+    expect(FakeCallTransport.instances.length).toBe(before);
   });
 
   it('ending the call while waiting to redial cancels the redial', async () => {
@@ -452,7 +459,7 @@ describe('a dropped call says so', () => {
     expect(reason).toContain('kokoro missing');
     const before = FakeCallTransport.instances.length;
     sock.emitClose(1011);
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]!);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]!);
     await flush();
     // The host ends the call behind an error it reported: no redial, same reason.
     expect(useVoiceStore.getState().callError).toBe(reason);
@@ -646,7 +653,7 @@ describe('the line under a call (heartbeat and call log)', () => {
     expect(sock.close).toHaveBeenCalled();
     expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
     expect(useVoiceStore.getState().callError).toBeNull();
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]!);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]!);
     await flush();
     expect(FakeCallTransport.instances.length).toBe(before + 1);
   });
@@ -677,7 +684,7 @@ describe('the line under a call (heartbeat and call log)', () => {
     sock.emitMessage(JSON.stringify({ type: 'audio.tts_end', sessionId: 'sess-1' }));
     sock.emitMessage(heartbeat(1, 40));
     sock.emitClose(1006);
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]!);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]!);
     await flush();
     const again = FakeCallTransport.last();
     again.emitOpen();
@@ -720,7 +727,7 @@ describe('errors the host ends the call on', () => {
     expect(useVoiceStore.getState().callError).not.toBeNull();
     const before = FakeCallTransport.instances.length;
     sock.emitClose(1011);
-    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]!);
+    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]!);
     await flush();
     expect(FakeCallTransport.instances.length).toBe(before);
   });

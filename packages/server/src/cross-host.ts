@@ -352,13 +352,15 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
 
     if (event.type === 'patch.search_chats.request') {
       if (fromHostId === null) return;
-      const answer = searchChats({ chatRegistry, chatLogStore }, event.query, event.limit);
-      hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
-        type: 'patch.search_chats.response',
-        sourceChatId: event.sourceChatId,
-        query: event.query,
-        ...answer,
-      });
+      const caller = fromHostId;
+      void searchChats({ chatRegistry, chatLogStore }, event.query, event.limit).then((answer) =>
+        hostLink.sendTo(caller, BRIDGE_SURFACE_ID, {
+          type: 'patch.search_chats.response',
+          sourceChatId: event.sourceChatId,
+          query: event.query,
+          ...answer,
+        }),
+      );
       return;
     }
 

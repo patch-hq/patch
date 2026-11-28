@@ -28,8 +28,8 @@ export function ConnectingLabel({
   word = 'Connecting',
 }: {
   color: string;
-  /** `Reconnecting` while a dropped line redials (spec/07 § A dropped call comes back). */
-  word?: 'Connecting' | 'Reconnecting';
+  /** `Lost contact` while a dropped line is being resumed (spec/07 § A dropped call comes back). */
+  word?: 'Connecting' | 'Lost contact';
 }): React.ReactElement {
   const [dots, setDots] = React.useState(1);
   React.useEffect(() => {
@@ -39,7 +39,7 @@ export function ConnectingLabel({
   return (
     <Text testID="call-connecting" style={{ color, fontFamily: fonts.bodyMedium, fontSize: 15 }}>
       {word}
-      {'.'.repeat(dots)}
+      {word === 'Connecting' ? '.'.repeat(dots) : ''}
     </Text>
   );
 }

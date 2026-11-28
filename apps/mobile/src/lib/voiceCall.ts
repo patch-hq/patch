@@ -37,7 +37,6 @@
 // voice agent, so a mode switch is always in place.
 
 import { playCallSound, syncCallSoundLoop } from './callSounds';
-import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import {
   AUDIO_NOTICE_CODES,
@@ -105,12 +104,6 @@ let _transientFocus = false;
 let _callAttempt = 0;
 /** Unsubscribe for the notification-button listener, while a session is open. */
 let _serviceActions: (() => void) | null = null;
-
-// Coming back to the foreground is the moment Android allows the mic to start
-// again: a waiting redial goes now rather than waiting out the backoff.
-AppState.addEventListener('change', (state) => {
-  if (state === 'active') _line?.foreground();
-});
 
 // The looping call sounds follow the call's state (spec/07 § Call sounds):
 // connecting while a call is first placed, reconnecting while a dropped line
@@ -192,9 +185,14 @@ function onLinePhase(next: CallLinePhase, prev: CallLinePhase, reason?: string):
   }
   if (next === 'reconnecting') {
     // Nothing said while the line is down is kept: the dead attempt's session
-    // took its microphone and playback with it, and the redial starts both afresh.
+    // took its microphone and playback with it, and the next attempt starts both afresh.
     st.setCallReconnecting(true);
     st.setCallPhase('connecting');
+    return;
+  }
+  if (next === 'ended') {
+    // The resume window ran out: the call ends, and never starts another by itself.
+    void endVoiceCall();
     return;
   }
   // failed: the bar stays up naming why, with Retry and End. NO FALLBACK.
@@ -266,10 +264,6 @@ export function startVoiceCall(
       hangUp: closeAttempt,
       send: sendOn,
       phase: onLinePhase,
-      stillTrying: (reason) => {
-        console.log(`[patch-voice] call redial still failing: ${reason}`);
-        useUiStore.getState().pushError(`voice call: ${reason} — still trying`);
-      },
     },
     nativeCallClock,
   );

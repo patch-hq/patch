@@ -92,8 +92,6 @@ const CLOSE_AUTH_FAILED = 4401;
 const CLOSE_NORMAL = 1000;
 /** Close reason the clients read as 'the agent hung up' (spec/07). */
 const END_BY_AGENT = 'ended_by_agent';
-/** How long after an agent hang-up a redial of that chat is answered with the hang-up. */
-const REDIAL_AFTER_AGENT_END_MS = 60_000;
 
 /** Map an audio error code to its WS close code. Auth/token failures → 4401; everything else (frame/session/capacity/backend) → 4400. */
 /**
@@ -292,8 +290,6 @@ export interface AudioServerOptions {
     chatId: string;
     active: boolean;
     startedAt: number;
-    /** The surface redialled this call after it dropped. */
-    resumed?: boolean;
   }) => void;
   /**
    * Fired when ANY voice session closes. The device control plane (F2) uses
@@ -491,9 +487,6 @@ class JtiReplayGuard {
 /** How long a closing audio server waits for its clients to say goodbye. */
 export const AUDIO_CLOSE_GRACE_MS = 1_000;
 
-/** The chat line a redialled call leaves (spec/07 § A dropped call comes back). */
-export const CALL_RESUMED_NOTE = 'The call was interrupted, so Patch started a new one';
-
 export async function startAudioServer(opts: AudioServerOptions): Promise<AudioServerHandle> {
   const log = opts.logger;
   const cap = opts.maxConcurrentSessions ?? 4;
@@ -513,7 +506,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
       chatId: entry.call.init.chatId,
       active,
       startedAt: entry.call.startedAt,
-      ...(entry.call.init.resumed === true ? { resumed: true } : {}),
     });
   };
 
@@ -594,11 +586,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
   };
 
   // spec/07 § The agent ends the call — a clean hang-up, never read as a drop.
-  // A phone that dropped just as the agent hung up redials; that redial must
-  // be told the call is over, not be given a new call.
-  const endedByAgentAt = new Map<string, number>();
   const hangUpByAgent = (active: ActiveSession): void => {
-    if (active.call !== undefined) endedByAgentAt.set(active.call.init.chatId, Date.now());
     if (active.callAnnounced === true) announceCall(active, false);
     endHere(active, CLOSE_NORMAL, END_BY_AGENT);
   };
@@ -878,17 +866,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           rejectConn(ws, 'token_replayed', 'voice token jti reused');
           return;
         }
-        if (start.resumes !== undefined) {
-          const endedAt = endedByAgentAt.get(start.chatId);
-          if (endedAt !== undefined && Date.now() - endedAt < REDIAL_AFTER_AGENT_END_MS) {
-            log.info(
-              { chatId: start.chatId },
-              'audio: redial of a call the agent ended, ending it',
-            );
-            ws.close(CLOSE_NORMAL, END_BY_AGENT);
-            return;
-          }
-        }
         // A redial of a call whose line dropped: the session is still here, held
         // (or its old connection not yet noticed gone), so this connection is put
         // back on it, with the same provider conversation, hand-offs and pushes.
@@ -930,6 +907,13 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           );
           return;
         }
+        // A call that cannot be resumed (the window ran out, the agent hung up, the
+        // host restarted) is over: it is never given a new session in its place.
+        if (start.resumes !== undefined) {
+          log.info({ resumes: start.resumes }, 'audio: no held session to resume, ending the call');
+          ws.close(CLOSE_NORMAL, END_BY_AGENT);
+          return;
+        }
         if (sessions.size >= cap) {
           rejectConn(
             ws,
@@ -949,11 +933,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           ...(start.deviceId !== undefined ? { deviceId: start.deviceId } : {}),
           ...(start.mode !== undefined ? { mode: start.mode } : {}),
           ...(start.addressWord !== undefined ? { addressWord: start.addressWord } : {}),
-          ...(start.resumes !== undefined ? { resumed: true } : {}),
-          // Said once, when the call first connects — never again on a redial.
-          ...(start.callReason !== undefined && start.resumes === undefined
-            ? { callReason: start.callReason }
-            : {}),
+          ...(start.callReason !== undefined ? { callReason: start.callReason } : {}),
         };
         // Which surface this session belongs to, then the backend it runs on
         // (spec/07 § Two kinds of call), read live so a settings change takes

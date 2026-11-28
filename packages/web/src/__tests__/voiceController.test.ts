@@ -37,7 +37,8 @@ import {
   endVoiceCall,
   describeCallError,
 } from '../lib/voiceController.js';
-import { CALL_REDIAL_DELAYS_MS } from '@patch/wire/call-line';
+import { CALL_RESUME_DELAYS_MS } from '@patch/wire/call-line';
+import { CALL_RESUME_WINDOW_MS } from '@patch/wire/audio';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -551,7 +552,7 @@ describe('voiceController', () => {
       lastCallbacks?.onClose();
       expect(useVoiceStore.getState().call).not.toBeNull();
       expect(useVoiceStore.getState().call?.phase).toBe('connecting');
-      await vi.advanceTimersByTimeAsync(CALL_REDIAL_DELAYS_MS[0] ?? 0);
+      await vi.advanceTimersByTimeAsync(CALL_RESUME_DELAYS_MS[0] ?? 0);
       expect(opened).toEqual([{}, { resumes: 'sess-1' }]);
       expect(useVoiceStore.getState().call).not.toBeNull();
     } finally {
@@ -573,7 +574,7 @@ describe('voiceController', () => {
       expect(looping('reconnecting')).toBe(true);
       // A redial is not a first dial: the connecting pulse stays off.
       expect(looping('connecting')).toBe(false);
-      await vi.advanceTimersByTimeAsync(CALL_REDIAL_DELAYS_MS[0] ?? 0);
+      await vi.advanceTimersByTimeAsync(CALL_RESUME_DELAYS_MS[0] ?? 0);
       expect(useVoiceStore.getState().call?.reconnecting).toBe(true);
       lastCallbacks?.onState?.('listening', 'sess-1');
       expect(useVoiceStore.getState().call?.reconnecting).toBe(false);
@@ -626,27 +627,25 @@ describe('voiceController', () => {
     }
   });
 
-  it('never gives up redialling a dropped call, saying once that it is still trying', async () => {
+  it('a call whose resume window runs out ends with the ended sound, and never opens a fresh session', async () => {
     vi.useFakeTimers();
     try {
-      const push = vi.spyOn(useUiStore.getState(), 'pushError');
       await startVoiceCall('c1');
       lastCallbacks?.onState?.('listening', 'sess-1');
-      let tries = 0;
-      __setAudioOpenerForTests(async () => {
-        tries++;
+      const opened: Array<{ resumes?: string }> = [];
+      __setAudioOpenerForTests(async (o) => {
+        opened.push({ ...(o.resumes !== undefined ? { resumes: o.resumes } : {}) });
         throw new Error('host unreachable');
       });
       lastCallbacks?.onClose();
-      for (const d of CALL_REDIAL_DELAYS_MS) await vi.advanceTimersByTimeAsync(d);
-      await vi.advanceTimersByTimeAsync(CALL_REDIAL_DELAYS_MS.at(-1)! * 3);
-      expect(useVoiceStore.getState().call?.reconnecting).toBe(true);
-      expect(tries).toBeGreaterThan(CALL_REDIAL_DELAYS_MS.length);
-      // Toasts expire, so the one said is read from the call that said it.
-      expect(push.mock.calls.map((c) => c[0])).toEqual([
-        'voice call: host unreachable — still trying',
-      ]);
-      push.mockRestore();
+      await vi.advanceTimersByTimeAsync(CALL_RESUME_WINDOW_MS + 1_000);
+      expect(useVoiceStore.getState().call).toBeNull();
+      expect(playCallSound).toHaveBeenCalledWith('ended');
+      const tries = opened.length;
+      expect(tries).toBeGreaterThan(1);
+      await vi.advanceTimersByTimeAsync(10 * CALL_RESUME_WINDOW_MS);
+      expect(opened).toHaveLength(tries);
+      expect(opened.every((o) => o.resumes === 'sess-1')).toBe(true);
     } finally {
       vi.useRealTimers();
       endVoiceCall();
@@ -712,7 +711,7 @@ describe('voiceController', () => {
     }
   });
 
-  it('a call that drops while the page is hidden redials as soon as it is seen again', async () => {
+  it('a call that drops while the page is hidden does not dial when it is seen again', async () => {
     vi.useFakeTimers();
     try {
       const opened: number[] = [];
@@ -725,7 +724,7 @@ describe('voiceController', () => {
       lastCallbacks?.onClose();
       document.dispatchEvent(new Event('visibilitychange'));
       await vi.advanceTimersByTimeAsync(0);
-      expect(opened).toHaveLength(2);
+      expect(opened).toHaveLength(1);
     } finally {
       vi.useRealTimers();
       endVoiceCall();

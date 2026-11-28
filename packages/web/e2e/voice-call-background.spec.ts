@@ -11,7 +11,7 @@ import { test, expect, type Page, type WebSocketRoute } from '@playwright/test';
 // minute, as Chrome does to a tab hidden for a few minutes (headless Chrome
 // never hides a page itself). The test checks that, so throttled, the call
 // still answers every heartbeat, and that when the host goes silent the page
-// notices on its own (three seconds), redials as a resumed call and comes back
+// notices on its own (three seconds), resumes the call and comes back
 // live — which it can only do if nothing a call needs runs on the page's timers.
 
 const CREDENTIAL = (() => {
@@ -70,7 +70,7 @@ async function playHost(page: Page): Promise<FakeSession[]> {
   return sessions;
 }
 
-test('a call in a background tab answers its heartbeats, and redials a dead line while hidden', async ({
+test('a call in a background tab answers its heartbeats, and resumes a dead line while hidden', async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -126,7 +126,7 @@ test('a call in a background tab answers its heartbeats, and redials a dead line
   await page.waitForTimeout(3_000);
   expect(echoes(first) - before).toBeGreaterThanOrEqual(10);
 
-  // The line goes dead while hidden: the page notices and redials on its own.
+  // The line goes dead while hidden: the page notices and resumes the same session on its own.
   first.silence();
   await expect.poll(() => sessions.length, { timeout: 8_000 }).toBe(2);
   const second = sessions[1]!;
@@ -134,7 +134,7 @@ test('a call in a background tab answers its heartbeats, and redials a dead line
   // The redial names the session it was last live on, so the host resumes it.
   expect(second.sent[0]).toMatchObject({ resumes: 'sess_1' });
   expect(await page.evaluate(() => document.visibilityState)).toBe('hidden');
-  // …and the redial is live: its heartbeats are answered too, still hidden.
+  // …and the resumed line is live: its heartbeats are answered too, still hidden.
   await expect.poll(() => echoes(second), { timeout: 5_000 }).toBeGreaterThan(3);
   await expect(bar).toHaveAttribute('data-state', 'listening');
 });

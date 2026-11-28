@@ -144,16 +144,16 @@ describe('CallStrip', () => {
     expect(queryHost(r.root, byTestId('call-wave'))).toBeNull();
   });
 
-  it('a dropped line reads Reconnecting… with the clock held where it dropped', () => {
+  it('a dropped line reads Lost contact with the clock held where it dropped', () => {
     call({ callPhase: 'connecting', callReconnectingSince: T0 + 65_000 });
     vi.setSystemTime(T0 + 90_000);
     const r = renderRN(<CallStrip />);
-    expect(textOf(findHost(r.root, byTestId('call-connecting')))).toBe('Reconnecting.');
+    expect(textOf(findHost(r.root, byTestId('call-connecting')))).toBe('Lost contact');
     expect(textOf(findHost(r.root, byTestId('call-timer')))).toBe('1:05');
     expect(queryHost(r.root, byTestId('call-wave'))).toBeNull();
   });
 
-  it('a failure while reconnecting shows the failure, not Reconnecting', () => {
+  it('a failure while reconnecting shows the failure, not Lost contact', () => {
     call({ callPhase: 'connecting', callReconnectingSince: T0, callError: 'host gone' });
     const r = renderRN(<CallStrip />);
     expect(queryHost(r.root, byTestId('call-connecting'))).toBeNull();

@@ -330,7 +330,7 @@ import {
   writeClaudeSettingsJson,
 } from './claudeSettings.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CALL_RESUMED_NOTE, startAudioServer, type AudioServerHandle } from './audio/server.js';
+import { startAudioServer, type AudioServerHandle } from './audio/server.js';
 import { createVoiceReplyBridge } from './audio/replyBridge.js';
 import { createManagerVoiceTools, type ManagerTimerRequest } from './audio/managerVoice.js';
 import {
@@ -7265,17 +7265,8 @@ async function startHost(
     },
     // spec/07 § A call can move between devices — account-scoped, so every
     // surface learns a call is live on this chat and can offer to take it.
-    onCallSession: ({ resumed, ...info }) => {
+    onCallSession: (info) => {
       emit({ type: 'voice.call', ...info, surfaceKind: String(info.surfaceKind) });
-      // spec/07 § A dropped call comes back — said in the chat, so a call that
-      // was cut and redialled is never silently a different call.
-      if (info.active && resumed === true) {
-        try {
-          daemon.recordCallNote(info.chatId, CALL_RESUMED_NOTE);
-        } catch (err) {
-          logger.error({ err: (err as Error).message }, 'voice: could not note the redialled call');
-        }
-      }
     },
     submitUserTurn: async ({ chatId, message, source, onReplyText }) => {
       // Tag the turn by its ingress. Physical voice devices get

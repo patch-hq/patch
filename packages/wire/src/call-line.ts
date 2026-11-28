@@ -1,16 +1,17 @@
 // The line under a call, the same on every surface (spec/07 § A dropped call
 // comes back, § Call logs).
 //
-// A call is one line made of a run of attempts: the first dial, then a redial
-// each time the line drops. This module decides everything about that line
+// A call is one line made of a run of attempts: the first dial, then an attempt
+// to resume the same session each time the line drops. This module decides everything about that line
 // that does not depend on how a surface opens a socket or plays audio:
 //
 // - when an attempt is live (the host acknowledged it), and when it is lost: a
 //   closed connection, the host gone, no answer in time, or three seconds
 //   without a heartbeat;
-// - redialling a lost line on one backoff, naming the session it was last live
-//   on so the host resumes it, saying once when it has run out of schedule, and redialling at once
-//   when the app comes back to the foreground;
+// - trying to resume a lost line, on one backoff, naming the session it was last
+//   live on so the host puts the attempt back on it, until the host's resume
+//   window runs out; then the call is over. A line never opens a new session
+//   by itself after a drop;
 // - the call log: why audio stopped, the heartbeat's measure of the
 //   connection, how long each step of each turn took, sent to the host when
 //   the line is back and when the call ends.
@@ -22,6 +23,7 @@
 
 import {
   CALL_LOG_MAX_ENTRIES,
+  CALL_RESUME_WINDOW_MS,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_LOST_AFTER_MS,
   type AudioCallLogEvent,
@@ -31,12 +33,11 @@ import {
 } from './audio.js';
 
 /**
- * Redial delays after a drop: about two minutes in all, long enough to ride
- * out a release restarting the server and the host. After the last one the
- * line keeps trying at the last delay until the call is ended.
+ * Delays between attempts to resume a dropped line; the last repeats until the
+ * host's resume window (`CALL_RESUME_WINDOW_MS`) runs out and the call ends.
  */
-export const CALL_REDIAL_DELAYS_MS: readonly number[] = [
-  1_000, 2_000, 4_000, 8_000, 15_000, 20_000, 30_000, 30_000,
+export const CALL_RESUME_DELAYS_MS: readonly number[] = [
+  1_000, 2_000, 4_000, 8_000, 15_000, 20_000, 30_000,
 ];
 
 /**
@@ -48,7 +49,8 @@ export const CALL_ACK_TIMEOUT_MS = 15_000;
 /** A heartbeat this much later than the interval counts as late. */
 const LATE_AFTER_MS = HEARTBEAT_INTERVAL_MS * 1.5;
 
-export type CallLinePhase = 'connecting' | 'live' | 'reconnecting' | 'failed';
+/** `reconnecting` is the line lost and being resumed; `ended` is the resume window run out. */
+export type CallLinePhase = 'connecting' | 'live' | 'reconnecting' | 'failed' | 'ended';
 
 /** Where a turn's timing has got to; see `CallLine.turn`. */
 export type TurnMark = 'speech_end' | 'transcript' | 'reply_audio' | 'reply_end';
@@ -63,7 +65,7 @@ export interface CallLineClock {
 export interface CallLineSurface {
   /**
    * Open a session for this attempt. `resumes` names the session the call was
-   * last live on, on a redial: the host puts the attempt back on it.
+   * last live on, on a resume attempt: the host puts the attempt back on it.
    */
   dial(attempt: number, resumes: string | null): void;
   /** Close this attempt's session: the line has written it off. The call goes on. */
@@ -72,8 +74,6 @@ export interface CallLineSurface {
   send(attempt: number, frame: AudioHeartbeatEvent | AudioCallLogEvent): boolean;
   /** The line moved to `next`; `reason` says why when it failed. */
   phase(next: CallLinePhase, prev: CallLinePhase, reason?: string): void;
-  /** Redialling has outlasted its schedule and goes on; said once per drop. */
-  stillTrying(reason: string): void;
 }
 
 interface Quality {
@@ -121,6 +121,7 @@ export class CallLine {
   private lastLiveSessionId: string | null = null;
   private ackTimer: unknown = null;
   private redialTimer: unknown = null;
+  private windowTimer: unknown = null;
   private watchdog: unknown = null;
   private turnAt: Turn | null = null;
   private log: CallLogEntry[] = [];
@@ -176,6 +177,7 @@ export class CallLine {
     if (!this.isCurrent(attempt)) return;
     if (this.state === 'live') return;
     this.clear('ackTimer');
+    this.clear('windowTimer');
     this.cur.sessionId = sessionId;
     this.lastLiveSessionId = sessionId;
     const prev = this.state;
@@ -236,8 +238,9 @@ export class CallLine {
 
   /**
    * `attempt` is gone: its connection closed, the host went away, it timed out
-   * or its setup failed. A live line redials; a redial tries again; a first
-   * dial that never connected has failed.
+   * or its setup failed. A live line starts trying to resume; a failed resume
+   * tries again until the window runs out; a first dial that never connected
+   * has failed.
    */
   lost(attempt: number, reason: CallStopReason, detail: string): void {
     if (!this.isCurrent(attempt)) return;
@@ -254,9 +257,14 @@ export class CallLine {
       this.record({ kind: 'audio_stopped', at: this.clock.now(), sessionId, reason, detail });
       this.recordQuality();
       this.downSince = this.clock.now();
+      // The host holds the session this long; after it there is nothing to resume.
+      this.windowTimer = this.clock.setTimeout(() => {
+        this.windowTimer = null;
+        this.giveUp();
+      }, CALL_RESUME_WINDOW_MS);
       this.move('reconnecting');
     }
-    this.scheduleRedial(detail);
+    this.scheduleRedial();
   }
 
   /**
@@ -321,13 +329,6 @@ export class CallLine {
     this.closeTurn(now);
   }
 
-  /** The app came back to the foreground: a waiting redial goes now. */
-  foreground(): void {
-    if (this.ended || this.redialTimer === null) return;
-    this.clear('redialTimer');
-    this.dial(this.lastLiveSessionId);
-  }
-
   /** The user ended the call: the log goes to the host, and the line stops. */
   end(): void {
     if (this.ended) return;
@@ -354,10 +355,21 @@ export class CallLine {
     this.surface.dial(attempt, resumes);
   }
 
-  private scheduleRedial(reason: string): void {
-    const last = CALL_REDIAL_DELAYS_MS.length - 1;
-    const delay = CALL_REDIAL_DELAYS_MS[Math.min(this.redials, last)] as number;
-    if (this.redials === CALL_REDIAL_DELAYS_MS.length) this.surface.stillTrying(reason);
+  /** The resume window ran out: the call is over, and no new session is opened. */
+  private giveUp(): void {
+    if (this.ended) return;
+    const attempt = this.cur.n;
+    const inFlight = !this.cur.over;
+    this.ended = true;
+    this.cur.over = true;
+    this.stopTimers();
+    if (inFlight) this.surface.hangUp(attempt);
+    this.move('ended');
+  }
+
+  private scheduleRedial(): void {
+    const last = CALL_RESUME_DELAYS_MS.length - 1;
+    const delay = CALL_RESUME_DELAYS_MS[Math.min(this.redials, last)] as number;
     this.redials += 1;
     this.redialTimer = this.clock.setTimeout(() => {
       this.redialTimer = null;
@@ -433,7 +445,7 @@ export class CallLine {
     this.droppedEntries = 0;
   }
 
-  private clear(timer: 'ackTimer' | 'redialTimer' | 'watchdog'): void {
+  private clear(timer: 'ackTimer' | 'redialTimer' | 'windowTimer' | 'watchdog'): void {
     if (this[timer] !== null) this.clock.clearTimeout(this[timer]);
     this[timer] = null;
   }
@@ -441,6 +453,7 @@ export class CallLine {
   private stopTimers(): void {
     this.clear('ackTimer');
     this.clear('redialTimer');
+    this.clear('windowTimer');
     this.clear('watchdog');
   }
 }

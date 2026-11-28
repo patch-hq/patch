@@ -1,7 +1,7 @@
 // Account-wide chat listing and search through the server (spec/06 § Cross-chat
 // toolset — `patch_list_chats`, `patch_search_chats`).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { registerCrossHostBridge } from '../src/cross-host.js';
@@ -46,9 +46,9 @@ function setup() {
 }
 
 describe('searchChats', () => {
-  it('finds by name, summary and message text across hosts, name matches first', () => {
+  it('finds by name, summary and message text across hosts, name matches first', async () => {
     const { chatRegistry, store } = setup();
-    const r = searchChats({ chatRegistry, chatLogStore: store }, 'deploy');
+    const r = await searchChats({ chatRegistry, chatLogStore: store }, 'deploy');
     expect(r.results.map((x) => x.chatId)).toEqual(['c-local', 'c-nolog', 'c-remote']);
     expect(r.results[2]).toMatchObject({
       hostId: 'host-b',
@@ -58,20 +58,34 @@ describe('searchChats', () => {
     expect(r.results[2]!.excerpts[0]!.text).toContain('DEPLOY');
   });
 
-  it('says how many chats were searched by metadata only', () => {
+  it('says how many chats were searched by metadata only', async () => {
     const { chatRegistry, store } = setup();
-    expect(searchChats({ chatRegistry, chatLogStore: store }, 'zzz')).toEqual({
+    expect(await searchChats({ chatRegistry, chatLogStore: store }, 'zzz')).toEqual({
       results: [],
       truncated: false,
       chatsWithoutLog: 1,
     });
   });
 
-  it('truncates to the limit and reports it', () => {
+  it('truncates to the limit and reports it', async () => {
     const { chatRegistry, store } = setup();
-    const r = searchChats({ chatRegistry, chatLogStore: store }, 'deploy', 1);
+    const r = await searchChats({ chatRegistry, chatLogStore: store }, 'deploy', 1);
     expect(r.results).toHaveLength(1);
     expect(r.truncated).toBe(true);
+  });
+});
+
+describe('searchChats does not hold the event loop', () => {
+  it('lets other work run while it searches, so a live call relayed through the server is not starved', async () => {
+    const { chatRegistry, store } = setup();
+    const order: string[] = [];
+    const searching = searchChats({ chatRegistry, chatLogStore: store }, 'deploy').then(() =>
+      order.push('search done'),
+    );
+    // Other work queued while the search is under way runs before it finishes.
+    setImmediate(() => order.push('other work'));
+    await searching;
+    expect(order).toEqual(['other work', 'search done']);
   });
 });
 
@@ -112,12 +126,13 @@ describe('cross-host bridge: listing and search', () => {
     });
   });
 
-  it('answers a search request to the asking host', () => {
+  it('answers a search request to the asking host', async () => {
     const b = bridge();
     b.feed(
       { type: 'patch.search_chats.request', sourceChatId: 'x', query: 'greenhouse' } as WireEvent,
       'host-a',
     );
+    await vi.waitFor(() => expect(b.sent).toHaveLength(1));
     expect(b.sent[0]!.hostId).toBe('host-a');
     expect(b.sent[0]!.event).toMatchObject({
       type: 'patch.search_chats.response',

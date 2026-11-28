@@ -199,11 +199,11 @@ describe('voice bar', () => {
     expect(screen.queryByTestId('voice-bar-wave')).toBeNull();
   });
 
-  it('says Reconnecting… while a dropped line redials, over whatever it was doing', () => {
+  it('says Lost contact while a dropped line is being resumed, over whatever it was doing', () => {
     open('call', { phase: 'speaking' as never, reconnecting: true, agentSpeaking: true });
     render(<VoiceBar />);
     expect(state()).toBe('reconnecting');
-    expect(screen.getByTestId('voice-bar-connecting').textContent).toBe('Reconnecting.');
+    expect(screen.getByTestId('voice-bar-connecting').textContent).toBe('Lost contact');
     expect(note()).toBeNull();
   });
 
