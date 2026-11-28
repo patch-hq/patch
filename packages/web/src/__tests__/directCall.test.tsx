@@ -15,6 +15,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore, type HostPresence } from '../stores/presenceStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
+import { NOT_SET_UP } from '@patch/wire/direct-call';
 import { useUiStore } from '../stores/uiStore.js';
 import { VoiceBar } from '../components/VoiceBar.js';
 import { endVoiceCall } from '../lib/voiceController.js';
@@ -74,14 +75,12 @@ function fakeRecorder() {
   return { rec, speak, cancel };
 }
 
-/** This browser's saved direct-call setup: the cloud engines its host has keys for. */
+/** The account's direct-call setup: the cloud engines its host has keys for. */
 const PREFS = {
   ...DEFAULT_PREFERENCES,
-  deviceDirectCall: {
-    s1: {
-      stt: { engine: 'groq' as const, model: 'whisper-large-v3-turbo' },
-      tts: { engine: 'openai' as const, model: 'gpt-4o-mini-tts', voice: 'alloy' },
-    },
+  directCall: {
+    stt: { engine: 'groq' as const, model: 'whisper-large-v3-turbo' },
+    tts: { engine: 'openai' as const, model: 'gpt-4o-mini-tts', voice: 'alloy' },
   },
 };
 
@@ -109,13 +108,15 @@ describe('direct call', () => {
     expect(pushError).toHaveBeenCalledWith('Cannot call direct: No speech engine');
   });
 
-  it('a browser with only cloud engines and nothing picked opens Settings → Voice calls rather than failing', async () => {
+  it('nothing picked yet opens Settings → Voice calls, saying what to do, rather than failing', async () => {
     usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
     const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
+    const pushNotice = vi.spyOn(useUiStore.getState(), 'pushNotice');
     const openTab = vi.spyOn(useLayoutStore.getState(), 'openTab');
     await startDirectCall('c1');
     expect(useVoiceStore.getState().call).toBeNull();
     expect(pushError).not.toHaveBeenCalled();
+    expect(pushNotice).toHaveBeenCalledWith(NOT_SET_UP);
     expect(useUiStore.getState().settingsPageRequest).toBe('voice');
     expect(openTab).toHaveBeenCalledWith({ kind: 'page', page: 'settings' });
   });

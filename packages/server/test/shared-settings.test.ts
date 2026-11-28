@@ -249,6 +249,18 @@ describe('SharedSettingsService', () => {
     expect('stalledThresholdMinutes' in loaded).toBe(false);
   });
 
+  it('direct calls are one setup now: an empty per-device map goes, one with a setup stops the load', () => {
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ deviceDirectCall: {} }));
+    const loaded = make().current();
+    expect('deviceDirectCall' in loaded).toBe(false);
+    expect(loaded.directCall).toBeUndefined();
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({ deviceDirectCall: { s1: { stt: { engine: 'groq' } } } }),
+    );
+    expect(() => make().current()).toThrow(/deviceDirectCall/);
+  });
+
   it('gives every deployment a stable public name from its generated identity key', () => {
     const first = service.current().agentIdentity.name;
     expect(make().current().agentIdentity.name).toBe(first);

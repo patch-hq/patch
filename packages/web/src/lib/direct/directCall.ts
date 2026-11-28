@@ -8,7 +8,6 @@
 import {
   agentWorkingLabel,
   directCallSummary,
-  NOT_SET_UP,
   resolveDirectCall,
   type ResolvedDirectCall,
 } from '@patch/wire/direct-call';
@@ -24,7 +23,6 @@ import {
 import { api } from '../../api/rest.js';
 import { useChatStore } from '../../stores/chatStore.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
-import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useLayoutStore } from '../../stores/layoutStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { useVoiceStore } from '../../stores/voiceStore.js';
@@ -113,19 +111,18 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
   const voice = useVoiceStore.getState();
   if (voice.call) return; // a call stays on the chat it was started on
   const prefs = usePreferencesStore.getState().preferences;
-  const surfaceId = usePresenceStore.getState().surfaceId;
   const resolved = resolveDirectCall(
     await currentSpeechEngines(),
-    surfaceId ? prefs.deviceDirectCall[surfaceId] : undefined,
+    prefs.directCall,
     prefs.voiceTones,
   );
   if (!resolved.ok) {
-    // A step with nothing to run on is a pick to make, not a failure: open the
-    // place to make it, with this device's row open (DirectCallsGroup).
-    if (resolved.reason === NOT_SET_UP) {
+    // A choice to make in Settings opens it, saying what to change, rather
+    // than only refusing (spec/07 § Direct calls).
+    if (resolved.settings) {
       useUiStore.getState().requestSettingsPage('voice');
       useLayoutStore.getState().openTab({ kind: 'page', page: 'settings' });
-      useUiStore.getState().pushNotice('Pick a speech engine for direct calls on this device.');
+      useUiStore.getState().pushNotice(resolved.reason);
       return;
     }
     useUiStore.getState().pushError(`Cannot call direct: ${resolved.reason}`);

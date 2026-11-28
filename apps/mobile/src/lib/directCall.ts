@@ -12,7 +12,6 @@ import {
   cloudSpeechEnginesFromHosts,
   directCallSummary,
   mergeSpeechEngines,
-  NOT_SET_UP,
   resolveDirectCall,
   CLOUD_STT_ENGINES,
   CLOUD_TTS_ENGINES,
@@ -291,7 +290,6 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
     useUiStore.getState().pushError('Cannot call direct: settings have not loaded yet');
     return;
   }
-  const surfaceId = usePresenceStore.getState().surfaceId;
   let report: SpeechEngineReport;
   try {
     report = await currentSpeechEngines(deps.mod ?? directCallModule());
@@ -299,15 +297,11 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
     useUiStore.getState().pushError(`Cannot call direct: ${(e as Error).message}`);
     return;
   }
-  const resolved = resolveDirectCall(
-    report,
-    surfaceId ? prefs.deviceDirectCall[surfaceId] : undefined,
-    prefs.voiceTones,
-  );
+  const resolved = resolveDirectCall(report, prefs.directCall, prefs.voiceTones);
   if (!resolved.ok) {
-    // A step with nothing to run on is a pick to make, not a failure: open the
-    // place to make it, with this phone's row open (DirectCallsSection).
-    if (resolved.reason === NOT_SET_UP) {
+    // A choice to make in Settings opens it — Settings shows what to change —
+    // rather than only refusing (spec/07 § Direct calls).
+    if (resolved.settings) {
       (deps.openSetup ?? (() => router.push('/settings/voice' as Href)))();
       return;
     }
