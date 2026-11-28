@@ -96,15 +96,16 @@ import {
 export const DEFAULT_GEMINI_LIVE_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
 
 /**
- * Affective dialog (`generationConfig.enableAffectiveDialog`, Settings' "Match
- * my tone") is only on the v1alpha Live API, so a session that asks for it
- * opens there.
+ * The Live API's WebSocket, on v1beta. Affective dialog
+ * (`generationConfig.enableAffectiveDialog`, Settings' "Match my tone") is a
+ * v1beta field too (checked against the Live API guide on 2026-11-28; it was
+ * v1alpha only when first added), and Gemini 2.5 Flash Live is the only model
+ * that takes it: another model refuses the session, which is reported.
  */
-function bidiGenerateContentUrl(apiKey: string, affective: boolean): string {
-  const version = affective ? 'v1alpha' : 'v1beta';
+function bidiGenerateContentUrl(apiKey: string): string {
   return (
     'wss://generativelanguage.googleapis.com/ws/' +
-    `google.ai.generativelanguage.${version}.GenerativeService.BidiGenerateContent?key=${apiKey}`
+    `google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`
   );
 }
 
@@ -594,16 +595,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
   }
 
   private async connect(): Promise<void> {
-    const url =
-      this.deps.wsUrl ??
-      bidiGenerateContentUrl(
-        this.deps.apiKey,
-        (
-          this.deps.soundConfig?.['generationConfig'] as
-            | { enableAffectiveDialog?: unknown }
-            | undefined
-        )?.enableAffectiveDialog === true,
-      );
+    const url = this.deps.wsUrl ?? bidiGenerateContentUrl(this.deps.apiKey);
     const Ctor = this.deps.wsCtor ?? (WsImpl as unknown as new (url: string) => WsSocket);
     const ws = new Ctor(url);
     this.ws = ws;
