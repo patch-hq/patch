@@ -14,7 +14,7 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.2.1',
+  version: '0.2.2',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
@@ -81,7 +81,12 @@ const config: ExpoConfig = {
   // their own: the voice service's start/update take new arguments (paused,
   // transient focus) and report headphones coming and going, so this JS must
   // not reach a 0.2.0 APK.
-  runtimeVersion: '0.2.1',
+  //
+  // Bumped to 0.2.2 for direct calls on the phone (its own recogniser, voices
+  // and Smart Turn through onnxruntime-android), the faster Smart Turn feature
+  // step, and the call log's audio-focus and device events: all native, so this
+  // JS must not reach a 0.2.1 APK.
+  runtimeVersion: '0.2.2',
   updates: {
     // Never contacted. The app points the updater at ITS server once paired
     // (src/lib/otaUpdates.ts), and nothing checks before that: there is no
