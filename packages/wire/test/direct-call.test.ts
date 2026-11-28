@@ -9,7 +9,6 @@ import {
   directCallSummary,
   DirectCallSetup,
   NO_SPEECH_ENGINE,
-  NOT_SET_UP,
   resolveDirectCall,
   speakablePieces,
   type SpeechEngineReport,
