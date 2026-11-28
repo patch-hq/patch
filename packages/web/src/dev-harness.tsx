@@ -2719,7 +2719,7 @@ Object.assign(window, { __startVoiceNote: startVoiceNote, __cancelVoiceNote: can
 
 // The real app renders the call sounds at start (main.tsx); a call cue throws if
 // they were not, so the harness does the same.
-warmCallSounds().catch((e: unknown) =>
+const callSoundsWarm = warmCallSounds().catch((e: unknown) =>
   console.error(`call sounds could not be warmed: ${String(e)}`),
 );
 (window as unknown as { __presenceStore?: typeof usePresenceStore }).__presenceStore =
@@ -3816,10 +3816,14 @@ const voiceParam = params.get('voice');
 const shellParam =
   params.get('shell') !== null || voiceParam !== null || params.get('remoteCall') !== null;
 if (voiceParam === 'call' || voiceParam === 'hands-free') {
-  useVoiceStore.getState().startCall(chatId, voiceParam);
-  useVoiceStore.getState().setCallPhase('listening');
-  const dropped = params.get('voiceLine');
-  if (dropped !== null) useVoiceStore.getState().setCallUnaddressed(dropped);
+  // The call's connecting cue throws unless the sounds are rendered, and the
+  // render is async: open the call once they are, as the app's first press would.
+  void callSoundsWarm.then(() => {
+    useVoiceStore.getState().startCall(chatId, voiceParam);
+    useVoiceStore.getState().setCallPhase('listening');
+    const dropped = params.get('voiceLine');
+    if (dropped !== null) useVoiceStore.getState().setCallUnaddressed(dropped);
+  });
 }
 
 // `?remoteCall=mobile|web|desktop` seeds a call live on ANOTHER surface, so the
