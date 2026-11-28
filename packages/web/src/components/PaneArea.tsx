@@ -1153,7 +1153,9 @@ function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMen
       });
     }
     out.push(
-      tab('new-triage', 'Triage', { kind: 'page', page: 'triage' }, 'Pages'),
+      ...(experimental
+        ? [tab('new-triage', 'Triage', { kind: 'page', page: 'triage' }, 'Pages')]
+        : []),
       ...(inboxOn ? [tab('new-inbox', 'Inbox', { kind: 'page', page: 'inbox' }, 'Pages')] : []),
       tab('new-pads', 'Pads', { kind: 'page', page: 'pads' }, 'Pages'),
       tab('new-jobs', 'Jobs', { kind: 'page', page: 'jobs' }, 'Pages'),
