@@ -141,7 +141,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     description:
       'Delivers a message into another existing chat as if the human sent it (agent-to-agent).',
     params:
-      'chatId: string, message: string, voicePrefix?: string, localId?: string, goal?: string',
+      'chatId: string, message: string, voicePrefix?: string, localId?: string, goal?: string, confirmArchived?: boolean',
   },
   {
     name: patchToolId('patch_send_back'),
