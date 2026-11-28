@@ -527,6 +527,12 @@ describe('ChatHeader', () => {
   it('an ordinary chat has no Manager settings gear', () => {
     render(<ChatHeader row={row({ chatId: 'c1' })} />);
     expect(screen.queryByTestId('action-manager-settings')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('reach-switch')).not.toBeInTheDocument();
+  });
+
+  it('the Manager header carries the reach switch', () => {
+    render(<ChatHeader row={row({ chatId: 'thread_manager' })} />);
+    expect(screen.getByTestId('reach-switch').textContent).toMatch(/Notify/);
   });
 
   it('Clear context calls rotateChat for the special thread', () => {

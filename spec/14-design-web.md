@@ -384,7 +384,7 @@ The batch ends once every member that was ready at check-in (or became ready sin
 
 Manager opens as an ordinary chat: the Manager conversation fills the main panel. Until it has a message, its empty chat says what it is in one line under its title: `Ask about any of your chats, or have it message them for you.`
 
-Its header carries one action no other chat has: a settings gear beside Zen (labelled "Manager settings") that opens Settings → Manager. A finished-chats delivery (`06-threads-manager-speakers.md` § Finished chats) shows as its `Finished · <chat name>` notes, each a collapsed entry that opens to its text, then the plain line after them, drawn as Patch's own message rather than as the user typing.
+Its header carries two controls no other chat has: a settings gear beside Zen (labelled "Manager settings") that opens Settings → Manager, and the reach switch, a pill reading "Notify" or "Auto-notify" that flips the account-wide reach setting (`09-notifications.md` § Reaching the user). A finished-chats delivery (`06-threads-manager-speakers.md` § Finished chats) shows as its `Finished · <chat name>` notes, each a collapsed entry that opens to its text, then the plain line after them, drawn as Patch's own message rather than as the user typing.
 
 ## Main chat panel
 
