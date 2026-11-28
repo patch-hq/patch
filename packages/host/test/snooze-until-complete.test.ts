@@ -258,6 +258,25 @@ describe('Snooze until complete', () => {
     second.daemon.shutdown();
   });
 
+  it('a host restart keeps a goal chat snoozed while its watch is still running', async () => {
+    const { backend } = gated();
+    const first = setup(backend);
+    const id = await first.daemon.spawnChat({ folder: first.folder });
+    await first.daemon.setGoal(id, 'wait for Apple');
+    const rec = first.daemon.startWatch(id, {
+      command: 'sleep 30',
+      description: 'w',
+      timeoutSec: 60,
+    });
+    await first.daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    first.daemon.shutdown();
+    const second = setup(backend, first.home);
+    second.daemon.hydrate();
+    expect(second.daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    second.daemon.stopWatch(id, rec.taskId);
+    second.daemon.shutdown();
+  });
+
   it('a host restart keeps it while the turn is interrupted and continued, then wakes when that returns', async () => {
     const first = gated();
     const a = setup(first.backend);

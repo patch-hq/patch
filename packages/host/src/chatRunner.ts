@@ -3945,6 +3945,10 @@ export class Daemon {
           // still coming back (spec/12 § Continue).
           this.interruptedChats.has(id) ||
           (wake !== null && wake.every === undefined) ||
+          // A background watch outlives the restart and is what will wake the
+          // chat; a chat with a goal waiting on one has not run out of work.
+          this.watch.count(id) > 0 ||
+          this.hasRunningDelegates(id) ||
           this.aggregateActivity(id) === 'running'
         );
       });
