@@ -113,6 +113,7 @@ export class CallLine {
   private cur: Attempt = CallLine.attempt(0, 0);
   private ended = false;
   private redials = 0;
+  private startRetried = false;
   private downSince = 0;
   private lastLiveSessionId: string | null = null;
   private ackTimer: unknown = null;
@@ -263,6 +264,18 @@ export class CallLine {
     if (!this.isCurrent(attempt)) return;
     this.cur.over = true;
     this.stopTimers();
+    // The voice agent stalling before the call connected is usually transient:
+    // dial once more, then say so. The retry is not hidden — a second failure fails.
+    if (
+      this.state === 'connecting' &&
+      !this.startRetried &&
+      message.startsWith('elevenlabs_unavailable')
+    ) {
+      this.startRetried = true;
+      this.surface.hangUp(attempt);
+      this.dial(false);
+      return;
+    }
     this.move('failed', message);
   }
 

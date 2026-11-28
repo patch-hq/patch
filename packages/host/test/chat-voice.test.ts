@@ -409,6 +409,27 @@ describe('chat voice glue', () => {
     expect(onCosted).toHaveBeenCalledTimes(1);
   });
 
+  it('writes no call line for an ElevenLabs agent that never opened', async () => {
+    const { daemon, events, folder, glue, onCosted } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    glue.callEnded({
+      init: init(chatId),
+      chatId,
+      startedAt: Date.UTC(2026, 9, 4, 12),
+      endedAt: Date.UTC(2026, 9, 4, 12, 0, 12),
+      engine: {
+        backend: 'elevenlabs',
+        model: 'claude-sonnet-5-5',
+        tokens: null,
+        stt: null,
+        agentSeconds: 0,
+      },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(messages(events)).toEqual([]);
+    expect(onCosted).not.toHaveBeenCalled();
+  });
+
   it('does not write an empty or punctuation-only utterance as the user speaking', async () => {
     const { daemon, events, folder, glue } = setup();
     const chatId = await daemon.spawnChat({ folder });
