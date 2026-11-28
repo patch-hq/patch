@@ -90,6 +90,8 @@ const CLOSE_AUTH_FAILED = 4401;
 const CLOSE_NORMAL = 1000;
 /** Close reason the clients read as 'the agent hung up' (spec/07). */
 const END_BY_AGENT = 'ended_by_agent';
+/** How long after an agent hang-up a redial of that chat is answered with the hang-up. */
+const REDIAL_AFTER_AGENT_END_MS = 60_000;
 
 /** Map an audio error code to its WS close code. Auth/token failures → 4401; everything else (frame/session/capacity/backend) → 4400. */
 /**
@@ -501,7 +503,11 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
   };
 
   // spec/07 § The agent ends the call — a clean hang-up, never read as a drop.
+  // A phone that dropped just as the agent hung up redials; that redial must
+  // be told the call is over, not be given a new call.
+  const endedByAgentAt = new Map<string, number>();
   const hangUpByAgent = (active: ActiveSession): void => {
+    if (active.call !== undefined) endedByAgentAt.set(active.call.init.chatId, Date.now());
     if (active.callAnnounced === true) announceCall(active, false);
     if (active.socket.readyState === active.socket.OPEN) {
       active.socket.close(CLOSE_NORMAL, END_BY_AGENT);
@@ -779,6 +785,17 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         if (!replay.consume(claims.jti, claims.exp)) {
           rejectConn(ws, 'token_replayed', 'voice token jti reused');
           return;
+        }
+        if (start.resumed === true) {
+          const endedAt = endedByAgentAt.get(start.chatId);
+          if (endedAt !== undefined && Date.now() - endedAt < REDIAL_AFTER_AGENT_END_MS) {
+            log.info(
+              { chatId: start.chatId },
+              'audio: redial of a call the agent ended, ending it',
+            );
+            ws.close(CLOSE_NORMAL, END_BY_AGENT);
+            return;
+          }
         }
         if (sessions.size >= cap) {
           rejectConn(
