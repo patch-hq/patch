@@ -24,6 +24,7 @@ import type {
   ChatTokenUsage,
   WatchTaskRow,
   StrayProcessRow,
+  ManagerFinishedStatus,
 } from '@patch/wire';
 import type { GoalPlan } from '../stores/types.js';
 
@@ -837,6 +838,8 @@ export const api = {
   // thread: retire its Claude session and start fresh, seeded with a handoff
   // digest. Refused server-side for anything that isn't Manager/Speakers.
   // `{carry: false}` is Clear (spec/06 § Bounded context): a fresh session with nothing carried.
+  // Finished chats → the Manager: what is waiting and the last delivery (spec/06 § Finished chats).
+  getManagerFinished: () => request<ManagerFinishedStatus>('/api/manager/finished'),
   rotateChat: (chatId: string, opts?: { carry: false }) =>
     request<{ ok: true }>(`/api/chats/${chatId}/rotate`, {
       method: 'POST',

@@ -11,6 +11,7 @@ import {
   DEFAULT_MANAGER_PROMPT,
   DEFAULT_MANAGER_VOICE_PROMPT,
   SPECIAL_THREAD_IDS,
+  finishedStatusLine,
   type ManagerWake,
 } from '@patch/wire';
 import { api } from '../../api/rest.js';
@@ -33,6 +34,25 @@ const WAKE_LABELS: Record<ManagerWake, string> = {
 };
 
 export const MANAGER_SESSION_QUERY = ['manager-session'] as const;
+export const MANAGER_FINISHED_QUERY = ['manager-finished'] as const;
+
+/** Finished chats → what is waiting and when the last delivery went (spec/06 § Finished chats). */
+function useFinishedStatusLine(): JSX.Element | string {
+  const status = useQuery({
+    queryKey: MANAGER_FINISHED_QUERY,
+    queryFn: () => api.getManagerFinished(),
+    refetchInterval: 30_000,
+  });
+  if (status.isError) {
+    return (
+      <span className="set-sub-error" data-testid="manager-finished-error">
+        {serverSays(status.error)}
+      </span>
+    );
+  }
+  if (!status.isSuccess) return 'Loading…';
+  return finishedStatusLine(status.data);
+}
 
 /** `today 09:12`, `yesterday 18:40`, `3 Nov 09:12`. */
 export function sessionStarted(at: number, now: number = Date.now()): string {
@@ -109,6 +129,7 @@ export function ManagerPage(): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
   const [addressWord, setAddressWord] = useState(preferences.addressWord);
   const model = useModelOptions(preferences.specialThreadModel);
+  const finishedLine = useFinishedStatusLine();
 
   // Track the server's value until the field is actually edited, so a load
   // arriving after mount is not left showing a stale word.
@@ -154,7 +175,7 @@ export function ManagerPage(): JSX.Element {
       </Group>
 
       <Group label="Finished chats" testid="settings-manager-wake">
-        <Row title="Send to the Manager">
+        <Row title="Send to the Manager" sub={finishedLine} testid="manager-finished-status">
           <Pills
             label="Send finished chats"
             options={['off', 'each', 'batched'] as const}

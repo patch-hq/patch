@@ -54,6 +54,7 @@ vi.mock('../src/api/rest', () => ({
     setManagerHome: vi.fn(),
     getChatSession: vi.fn(),
     rotateChat: vi.fn(),
+    managerFinished: vi.fn(),
   },
 }));
 
@@ -73,6 +74,9 @@ beforeEach(() => {
   vi.mocked(api.managerHome).mockReset().mockResolvedValue({ hostId: 'home' });
   vi.mocked(api.getChatSession).mockReset().mockResolvedValue({ session: null });
   vi.mocked(api.rotateChat).mockReset().mockResolvedValue({ ok: true });
+  vi.mocked(api.managerFinished)
+    .mockReset()
+    .mockResolvedValue({ waiting: 0, sending: 0, lastSent: null });
   vi.mocked(api.managerHomeDraft).mockReset().mockResolvedValue({ message: 'user: hello' });
   vi.mocked(api.setManagerHome)
     .mockReset()
@@ -649,6 +653,30 @@ describe('Manager page', () => {
       '/srv/nope is not a folder on laptop',
     );
     expect(findHost(r.root, byTestId('manager-folder-input'))).toBeDefined();
+  });
+
+  it('Finished chats shows what is waiting and when the last delivery went', async () => {
+    vi.mocked(api.managerFinished).mockResolvedValue({
+      waiting: 2,
+      sending: 0,
+      lastSent: { at: new Date().setHours(14, 30, 0, 0), chats: 1 },
+    });
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('manager-finished-status')))).toBe(
+      '2 waiting · last sent 14:30',
+    );
+  });
+
+  it('a status the server could not give is said, not hidden', async () => {
+    vi.mocked(api.managerFinished).mockRejectedValue(new Error('HTTP 502'));
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('manager-finished-status')))).toBe(
+      'Could not read finished chats: HTTP 502',
+    );
   });
 
   it('Finished chats has a title and no explainer', async () => {
