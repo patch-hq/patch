@@ -262,10 +262,6 @@ export interface AudioServerOptions {
    * Default 4 (matches Groq budget per spec).
    */
   maxConcurrentSessions?: number;
-  /** A peer silent (no frame, no pong) this long is dropped. Default 45 s. */
-  deadPeerTimeoutMs?: number;
-  /** How often peers are pinged. Default 15 s. */
-  pingIntervalMs?: number;
   /** Heartbeat interval on an app call. Tests shorten it; production uses the wire's. */
   heartbeatIntervalMs?: number;
   /**
@@ -628,10 +624,11 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     let pendingBinaryMeta: { samples: number } | undefined;
 
     watchPeerLiveness(ws, {
-      ...(opts.deadPeerTimeoutMs !== undefined ? { timeoutMs: opts.deadPeerTimeoutMs } : {}),
-      ...(opts.pingIntervalMs !== undefined ? { pingIntervalMs: opts.pingIntervalMs } : {}),
-      onDead: (silentMs) =>
-        log.warn({ sessionId: urlSessionId, silentMs }, 'audio: peer went silent, ending session'),
+      onGone: (silentMs) =>
+        log.warn(
+          { sessionId: urlSessionId, silentMs },
+          'audio: nothing heard from the peer, ending session',
+        ),
     });
     ws.on('message', (data: Buffer | string, isBinary: boolean) => {
       if (isBinary) {

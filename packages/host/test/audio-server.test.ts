@@ -15,7 +15,12 @@ import { startAudioServer, type AudioServerHandle } from '../src/audio/server.js
 import { createWhisper } from '../src/audio/whisper.js';
 import { createKokoro } from '../src/audio/kokoro.js';
 import type { KokoroBackend, KokoroSynthesis } from '../src/audio/kokoro.js';
-import { encodeAudio, decodeAudio, type AudioEvent } from '@patch/wire/audio';
+import {
+  encodeAudio,
+  decodeAudio,
+  HEARTBEAT_LOST_AFTER_MS,
+  type AudioEvent,
+} from '@patch/wire/audio';
 import { MockVad, type Vad, type VadFrameResult } from '../src/audio/vad.js';
 
 const SECRET = 'unit-test-internal-token-aaaaaaaaaa';
@@ -61,7 +66,6 @@ async function recvOne(ws: WebSocket): Promise<AudioEvent> {
 
 async function startServer(opts?: {
   cap?: number;
-  deadPeerMs?: number;
   reply?: string;
   onDeviceSession?: (deviceId: string, active: boolean) => void;
   chatExists?: (chatId: string) => boolean;
@@ -79,9 +83,6 @@ async function startServer(opts?: {
     // Default: every chat exists. Tests for E1-d3 override this.
     chatExists: opts?.chatExists ?? ((): boolean => true),
     ...(opts?.cap !== undefined ? { maxConcurrentSessions: opts.cap } : {}),
-    ...(opts?.deadPeerMs !== undefined
-      ? { deadPeerTimeoutMs: opts.deadPeerMs, pingIntervalMs: 50 }
-      : {}),
     ...(opts?.onDeviceSession !== undefined ? { onDeviceSession: opts.onDeviceSession } : {}),
   });
   const addr = handle.address();
@@ -2004,23 +2005,57 @@ describe('audio WSS server', () => {
   });
 });
 
-describe('audio WSS server — dead peer', () => {
-  test('a peer that never answers is dropped by the server', async () => {
-    const server = await startServer({ deadPeerMs: 250 });
+describe('audio WSS server — a gone peer', () => {
+  // spec/07 § A dropped call comes back — the host judges a peer by the frames it
+  // hears, on the heartbeat's rule. A pong is answered by whatever holds the socket
+  // (the server's relay, in production), so it never keeps a peer alive.
+  test("a peer that sends nothing is dropped after the heartbeat's lost time, pongs or not", async () => {
+    const server = await startServer();
     try {
-      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/audio/s-dead`, {
-        autoPong: false,
-      });
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/audio/s-dead`);
       await new Promise<void>((r) => ws.once('open', () => r()));
-      await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('peer was not dropped')), 3000);
+      const openedAt = Date.now();
+      const closedAt = await new Promise<number>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('peer was not dropped')), 6000);
         ws.once('close', () => {
           clearTimeout(t);
-          resolve();
+          resolve(Date.now());
         });
       });
+      expect(closedAt - openedAt).toBeGreaterThanOrEqual(HEARTBEAT_LOST_AFTER_MS - 50);
     } finally {
       await server.close();
     }
-  });
+  }, 10_000);
+
+  test('a peer that keeps sending frames stays', async () => {
+    const server = await startServer();
+    try {
+      const ws = await openSocket(server.port, 's-alive');
+      ws.send(
+        encodeAudio({
+          type: 'audio.session_start',
+          sessionId: 's-alive',
+          accountId: 'a',
+          surfaceId: 'dev',
+          surfaceKind: 'device',
+          deviceId: 'dev',
+          chatId: 'c',
+          role: 'voice-device-conv',
+          token: mintToken({ accountId: 'a', surfaceId: 'dev', sessionId: 's-alive' }),
+          surfaceHasAec: true,
+        }),
+      );
+      let closed = false;
+      ws.once('close', () => (closed = true));
+      // A device streams its microphone for as long as the session is open.
+      const tick = setInterval(() => ws.send(Buffer.alloc(960), { binary: true }), 500);
+      await new Promise((r) => setTimeout(r, HEARTBEAT_LOST_AFTER_MS + 1500));
+      clearInterval(tick);
+      expect(closed).toBe(false);
+      ws.close();
+    } finally {
+      await server.close();
+    }
+  }, 10_000);
 });

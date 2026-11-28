@@ -64,9 +64,7 @@ export interface VoiceAgentCallOptions {
  * The longest a goodbye is waited for before the call is ended anyway: far
  * longer than any spoken goodbye, short enough that a call asked to end does.
  */
-const GOODBYE_MAX_MS = 15_000;
-/** How often the line is checked for having gone quiet after a goodbye. */
-const GOODBYE_POLL_MS = 100;
+export const GOODBYE_MAX_MS = 15_000;
 
 /** A pushed message waiting for a quiet moment. */
 interface Push {
@@ -82,6 +80,8 @@ export class VoiceAgentCall {
   /** The session is set up: context and pushes can be sent. */
   private live = false;
   private closed = false;
+  /** Waiting for the line to go quiet after the voice's goodbye (`untilGoodbyeHeard`). */
+  private goodbyeWaiter: (() => void) | null = null;
   /** Catch-ups that arrived before the session was set up. */
   private pendingContext: string[] = [];
   private readonly pushes: Push[] = [];
@@ -177,6 +177,12 @@ export class VoiceAgentCall {
   /** Send the oldest push if the line is quiet. Providers call this whenever it may have gone quiet. */
   flush(): void {
     if (this.closed || !this.live || !this.engine) return;
+    if (this.goodbyeWaiter && this.engine.isIdle()) {
+      const w = this.goodbyeWaiter;
+      this.goodbyeWaiter = null;
+      w();
+      return;
+    }
     const next = this.pushes[0];
     if (!next || !this.engine.isIdle()) return;
     this.pushes.shift();
@@ -253,20 +259,34 @@ export class VoiceAgentCall {
   }
 
   /**
-   * The voice says goodbye, then hangs up: wait until it has finished and the
-   * surface has played it. Bounded, so a provider that never goes quiet cannot
-   * hold a call open the voice asked to end: past the bound it ends anyway.
+   * The voice says goodbye, then hangs up: wait until its reply has ended (the
+   * provider's own end of reply, which every engine reports by calling `flush`)
+   * and the surface has played what was sent, which the audio's length says.
+   * Bounded, so a provider that never goes quiet cannot hold open a call the
+   * voice asked to end: past the bound it ends anyway, and says so.
    */
   private async untilGoodbyeHeard(): Promise<void> {
     const engine = this.engine;
     if (!engine) return;
     const deadline = Date.now() + GOODBYE_MAX_MS;
-    // Polled, not signalled: "quiet" is the provider's reply ending AND the
-    // surface's playback running out, two clocks in different places.
-    while (Date.now() < deadline && !(engine.isIdle() && engine.playbackLeftMs() <= 0)) {
-      await new Promise((r) => setTimeout(r, GOODBYE_POLL_MS));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = (ms: number): Promise<'bound'> =>
+      new Promise((r) => (timer = setTimeout(() => r('bound'), Math.max(0, ms))));
+    const quiet = new Promise<'quiet'>((resolve) => {
+      if (engine.isIdle()) resolve('quiet');
+      else this.goodbyeWaiter = () => resolve('quiet');
+    });
+    let outcome = await Promise.race([quiet, bound(GOODBYE_MAX_MS)]);
+    clearTimeout(timer);
+    this.goodbyeWaiter = null;
+    if (outcome === 'quiet') {
+      const left = engine.playbackLeftMs();
+      if (left > 0) {
+        outcome = left > deadline - Date.now() ? 'bound' : 'quiet';
+        await bound(Math.min(left, deadline - Date.now()));
+      }
     }
-    if (Date.now() >= deadline) {
+    if (outcome === 'bound') {
       this.opts.logger.warn(
         { sessionId: this.opts.sessionId },
         'voice: the goodbye did not finish in time; ending the call anyway',

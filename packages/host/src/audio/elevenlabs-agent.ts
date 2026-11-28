@@ -95,14 +95,23 @@ const OUTPUT_FORMAT = 'pcm_24000';
 export const ELEVENLABS_MAX_CALL_SECONDS = 3600;
 
 /**
- * How long a reply's audio must be quiet, once its full text has arrived, before
- * the reply counts as finished. ElevenLabs never marks the last audio chunk
- * (`is_final` stays false and `agent_response_complete` is not sent — observed
- * 2026-11-07), so the end of a reply is: its `agent_response` text is in, and
- * the audio stream has stopped. Audio streams far faster than real time, so a
- * gap this long after the text is in is the end, not a pause.
+ * The server events the call is sent. Naming them replaces ElevenLabs' default
+ * set, so this is every event the session handles. `agent_response_complete` is
+ * the end of a reply and is only sent when asked for here; it is the only event
+ * that marks the end of a reply's audio (`agent_response` arrives once the text is
+ * done, usually while its audio is still streaming).
  */
-export const REPLY_QUIET_MS = 600;
+export const CLIENT_EVENTS = [
+  'conversation_initiation_metadata',
+  'ping',
+  'audio',
+  'interruption',
+  'user_transcript',
+  'agent_response',
+  'agent_response_correction',
+  'agent_response_complete',
+  'client_tool_call',
+] as const;
 
 /**
  * How long the agent has to be provisioned, connected and initiated before the
@@ -146,7 +155,6 @@ export interface ElevenLabsAgentDeps {
   /** The conversation is gone for good; the audio server ends the surface session. */
   onFatal?: (message: string) => void;
   /** Test seams. */
-  replyQuietMs?: number;
   /** Override of {@link SETUP_TIMEOUT_MS}. */
   setupTimeoutMs?: number;
   wsCtor?: ElevenLabsWsCtor;
@@ -163,7 +171,7 @@ interface AgentEvent {
   };
   user_transcription_event?: { user_transcript?: string };
   agent_response_event?: { agent_response?: string };
-  audio_event?: { audio_base_64?: string; event_id?: number; is_final?: boolean };
+  audio_event?: { audio_base_64?: string; event_id?: number };
   interruption_event?: { event_id?: number };
   agent_response_correction_event?: {
     original_agent_response?: string;
@@ -201,9 +209,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   /** Hands-free: the agent's reply to a heard-but-not-addressed transcript is dropped. */
   private suppressReply = false;
   private audioOpen = false;
-  /** The current reply's full text has arrived (`agent_response`). */
-  private replyTextIn = false;
-  private quietTimer?: ReturnType<typeof setTimeout>;
   /** The chat as it stood when the call started; at the end of the agent's prompt. */
   private startContext = '';
   // --- the reply as the user hears it (spec/07 § Barge-in) ---
@@ -423,7 +428,10 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
               tool_ids: this.toolIds,
             },
           },
-          conversation: { max_duration_seconds: ELEVENLABS_MAX_CALL_SECONDS },
+          conversation: {
+            max_duration_seconds: ELEVENLABS_MAX_CALL_SECONDS,
+            client_events: [...CLIENT_EVENTS],
+          },
           asr: { user_input_audio_format: INPUT_FORMAT },
           tts: {
             agent_output_audio_format: OUTPUT_FORMAT,
@@ -666,7 +674,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     // A new turn begins: whatever the last one suppressed is over.
     this.suppressReply = false;
     this.endAudio(false);
-    this.replyTextIn = false;
     if (isNoiseTranscript(text)) {
       // ElevenLabs transcribes noise as "..." — not a turn, not a bubble, and the voice's
       // answer to it is dropped (as in gemini-live.ts).
@@ -702,8 +709,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   }
 
   private onAgentResponse(raw: string): void {
-    this.replyTextIn = true;
-    this.armQuiet();
     const text = raw.replace(AUDIO_TAG, '').trim();
     if (this.suppressReply || isNoiseTranscript(text)) return;
     // What the voice said is written into the chat, apart from the agent's own messages,
@@ -716,17 +721,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   private spokenReply(): SpokenReply {
     this.reply ??= new SpokenReply(() => this.deps.timeline.beginReply(this.call.chatId));
     return this.reply;
-  }
-
-  /** (Re)start the end-of-reply clock: the text is in and the audio has gone quiet. */
-  private armQuiet(): void {
-    if (this.quietTimer) clearTimeout(this.quietTimer);
-    this.quietTimer = undefined;
-    if (!this.replyTextIn || !this.audioOpen) return;
-    this.quietTimer = setTimeout(() => {
-      this.quietTimer = undefined;
-      this.endAudio(false);
-    }, this.deps.replyQuietMs ?? REPLY_QUIET_MS);
   }
 
   private onAudio(a: NonNullable<AgentEvent['audio_event']>): void {
@@ -745,10 +739,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
           samples: pcm.length,
         });
         this.deps.sendBinary(pcm);
-        this.armQuiet();
       }
     }
-    if (a.is_final === true) this.endAudio(false);
   }
 
   /**
@@ -757,8 +749,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
    * played out, or as far as the user heard.
    */
   private endAudio(bargedIn: boolean): void {
-    if (this.quietTimer) clearTimeout(this.quietTimer);
-    this.quietTimer = undefined;
     if (bargedIn) {
       const target = this.reply ?? this.lastReply;
       this.lastReply = undefined;
@@ -780,7 +770,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.reply = undefined;
     if (!this.audioOpen) return;
     this.audioOpen = false;
-    this.replyTextIn = false;
     this.deps.sendAudio({
       type: 'audio.tts_end',
       sessionId: this.init.sessionId,
@@ -927,8 +916,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.call.close();
     this.closed = true;
     this.closedAt = Date.now();
-    if (this.quietTimer) clearTimeout(this.quietTimer);
-    this.quietTimer = undefined;
     const w = this.setupWaiter;
     this.setupWaiter = undefined;
     w?.reject(new Error('session closed'));

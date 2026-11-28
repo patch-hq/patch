@@ -17,7 +17,7 @@
 // A transcription failure is reported (`onError`), never treated as either
 // answer (NO SILENT FALLBACK).
 
-import type { Vad } from './vad.js';
+import { DEFAULT_VAD_CONFIG, type Vad } from './vad.js';
 import type { WhisperBackend } from './whisper.js';
 import { DEFAULT_ADDRESS_WORD, isAddressed } from './session.js';
 
@@ -26,8 +26,8 @@ const FRAME_MS = (n: number): number => (n / 16000) * 1000;
 /** Audio kept from before the VAD fires, so the first word is not clipped. */
 const PREROLL_MS = 400;
 
-/** The VAD's own hangover before it reports an end (DEFAULT_VAD_CONFIG.silenceHangoverMs). */
-const VAD_HANGOVER_MS = 500;
+/** The VAD's own hangover before it reports an end. */
+const VAD_HANGOVER_MS = DEFAULT_VAD_CONFIG.silenceHangoverMs;
 
 /** An utterance this long with no end is cut off rather than held for ever. */
 const MAX_HELD_MS = 60_000;

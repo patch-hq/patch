@@ -14,7 +14,11 @@ import {
   PASS_TO_AGENT_TOOL_NAME,
   type StartFacts,
 } from '../src/audio/voiceAgent.js';
-import { VoiceAgentCall, type VoiceAgentEngine } from '../src/audio/voiceAgentCall.js';
+import {
+  GOODBYE_MAX_MS,
+  VoiceAgentCall,
+  type VoiceAgentEngine,
+} from '../src/audio/voiceAgentCall.js';
 import { SpokenReply } from '../src/audio/spokenReply.js';
 import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
 
@@ -243,6 +247,37 @@ describe('VoiceAgentCall', () => {
     call.attach(engine);
     expect(context).toHaveLength(1);
     expect(context[0]).toContain('caught up');
+  });
+
+  test('end call waits for the reply to end, which the engine signals by flushing', async () => {
+    const { link } = fakeVoiceAgentLink();
+    const { call, engine, setIdle } = makeCall(link);
+    call.attach(engine);
+    setIdle(false);
+    const ending = call.runTool('end_call', {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(link.endCall).not.toHaveBeenCalled();
+    setIdle(true);
+    call.flush();
+    await expect(ending).resolves.toBe('The call has ended.');
+    expect(link.endCall).toHaveBeenCalledWith('s1');
+  });
+
+  test('a goodbye that never ends is bounded: the call ends anyway', async () => {
+    vi.useFakeTimers();
+    try {
+      const { link } = fakeVoiceAgentLink();
+      const { call, engine, setIdle } = makeCall(link);
+      call.attach(engine);
+      setIdle(false);
+      const ending = call.runTool('end_call', {});
+      await vi.advanceTimersByTimeAsync(GOODBYE_MAX_MS - 1);
+      expect(link.endCall).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(ending).resolves.toBe('The call has ended.');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('end call waits for the goodbye to have played, then hangs up through the host', async () => {
