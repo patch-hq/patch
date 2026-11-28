@@ -295,6 +295,12 @@ export const ChatMeta = z
      * here, so the refusal is said once, not at every restart.
      */
     folderRefused: z.string().min(1).optional(),
+    /**
+     * The Manager's current session has been told, in its thread, that its
+     * agent does not take the Manager prompt (an ACP agent). Cleared with
+     * the session.
+     */
+    managerPromptNoted: z.boolean().optional(),
     /** Which track the chat IS right now (spec/04 § Branching). */
     activeBranchId: z.string().min(1).optional(),
     /** Per-chat monotonic sequence — next value to stamp. Strictly increasing. */

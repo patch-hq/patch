@@ -104,6 +104,37 @@ describe('the Manager prompt', () => {
   });
 });
 
+describe('the Manager prompt on an ACP agent', () => {
+  it('is said not to apply, once per session rather than every turn', async () => {
+    n = 0;
+    const t = setup();
+    t.daemon.setManagerPrompt('You are the Manager.');
+    const manager = await t.daemon.spawnChat({ folder: t.folder });
+    t.daemon.chatState.get(manager)!.model = 'acp/gemini/gemini-pro';
+    const notes = (): string[] =>
+      systemLines(t.events).filter((l) => l.startsWith('Manager prompt not applied'));
+    await turn(t, manager, 'acp-gemini-r-one');
+    expect(notes()).toEqual(['Manager prompt not applied · gemini takes no system prompt']);
+    await turn(t, manager, 'acp-gemini-r-one').catch(() => undefined);
+    expect(notes()).toHaveLength(1);
+    // A fresh session is told again.
+    await t.daemon.rotateThread(manager, { carry: false });
+    await turn(t, manager, 'acp-gemini-r-two');
+    expect(notes()).toHaveLength(2);
+  });
+
+  it('says nothing on an agent that takes the prompt', async () => {
+    n = 0;
+    const t = setup();
+    t.daemon.setManagerPrompt('You are the Manager.');
+    const manager = await t.daemon.spawnChat({ folder: t.folder });
+    await turn(t, manager);
+    expect(systemLines(t.events).some((l) => l.startsWith('Manager prompt not applied'))).toBe(
+      false,
+    );
+  });
+});
+
 describe('Clear', () => {
   it('retires the session with nothing carried, and says so', async () => {
     n = 0;
