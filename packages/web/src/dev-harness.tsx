@@ -87,6 +87,14 @@ import './index.css';
 // component renders so we capture errors from the very first render.
 installDevErrorQueue();
 
+// The real app renders the call sounds at start (main.tsx), and a call cue throws
+// if that was never begun. A call seeded with `?voice=` starts its connecting
+// loop while this module is still evaluating, so warming begins before anything
+// is seeded (a cue asked for meanwhile waits for it).
+const callSoundsWarmed = warmCallSounds().catch((e: unknown) =>
+  console.error(`call sounds could not be warmed: ${String(e)}`),
+);
+
 // Mirrors main.tsx's spec/05 § Window chrome boot hook, so e2e can stub
 // `window.patch.overlayTitleBar` and measure the REAL traffic-light inset and
 // drag regions against the real CSS. Without the mirror the harness would only
@@ -4395,12 +4403,9 @@ function Harness(): JSX.Element {
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root missing');
-// The real app renders the call sounds at start (main.tsx) and a call cue throws
-// if they were not. A call seeded with `?voice=` plays its first cue as soon as
-// the bar mounts, so the harness waits for them before it renders.
-await warmCallSounds().catch((e: unknown) =>
-  console.error(`call sounds could not be warmed: ${String(e)}`),
-);
+// The sounds were warming since the top of this file; wait for them, so the
+// bar a seeded call mounts has them ready.
+await callSoundsWarmed;
 
 createRoot(root).render(
   <StrictMode>
