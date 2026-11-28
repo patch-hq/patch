@@ -3,10 +3,18 @@
 // is the home host's (`ChatRunner.deliverFinishedChats`, tested there).
 
 import { describe, test, expect, beforeEach } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import pino from 'pino';
 import { SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
 import { ChatRegistry } from '../src/chat-registry.js';
-import { ManagerFinishedCollector, IN_FLIGHT_STALE_MS } from '../src/manager-finished.js';
+import {
+  ManagerFinishedCollector,
+  IN_FLIGHT_STALE_MS,
+  RETRY_AFTER_FAILURE_MS,
+  type ManagerFinishedDeps,
+} from '../src/manager-finished.js';
 import { DEFAULT_SETTINGS, type AccountSettings } from '../src/settings.js';
 
 const logger = pino({ level: 'silent' });
@@ -31,10 +39,30 @@ function state(chatId: string, over: Partial<Record<string, unknown>> = {}): Wir
 describe('ManagerFinishedCollector', () => {
   let chats: ChatRegistry;
   let settings: AccountSettings;
-  let delivered: { runId: string; chats: { chatId: string }[]; windowMinutes?: number }[];
+  let delivered: {
+    runId: string;
+    chats: { chatId: string; name: string; hostName?: string }[];
+    windowMinutes?: number;
+  }[];
   let collector: ManagerFinishedCollector;
   let nowMs: number;
   let hostOnline: boolean;
+  let reported: string[];
+
+  function make(over: Partial<ManagerFinishedDeps> = {}): ManagerFinishedCollector {
+    return new ManagerFinishedCollector({
+      chats,
+      settings: () => settings,
+      managerHostId: () => (hostOnline ? 'd1' : undefined),
+      hostName: (id) => (id === 'd1' ? 'Studio Mac' : undefined),
+      deliver: (req) => delivered.push(req),
+      reportFailure: (m) => reported.push(m),
+      logger,
+      now: () => nowMs,
+      idGenerator: () => `run-${delivered.length}`,
+      ...over,
+    });
+  }
 
   // Production feeds the same event stream to the registry first, then here.
   function emit(event: WireEvent): void {
@@ -56,15 +84,8 @@ describe('ManagerFinishedCollector', () => {
     hostOnline = true;
     settings = { ...DEFAULT_SETTINGS, managerWake: 'batched', managerWakeIntervalMinutes: 30 };
     nowMs = 1_700_000_000_000;
-    collector = new ManagerFinishedCollector({
-      chats,
-      settings: () => settings,
-      managerHostId: () => (hostOnline ? 'd1' : undefined),
-      deliver: (req) => delivered.push(req),
-      logger,
-      now: () => nowMs,
-      idGenerator: () => `run-${delivered.length}`,
-    });
+    reported = [];
+    collector = make();
   });
 
   test('off by default', () => {
@@ -116,13 +137,90 @@ describe('ManagerFinishedCollector', () => {
     expect(ids(1)).toEqual(['c2']);
   });
 
-  test('a delivery that never reports back stops blocking after a while', () => {
+  test('a delivery that never reports back: its chats go again after a pause, and the user is told', () => {
     settings = { ...settings, managerWake: 'each' };
     finish('c1');
     finish('c2');
     expect(collector.tick()).toBe(false);
     nowMs += IN_FLIGHT_STALE_MS + 1;
+    expect(collector.tick()).toBe(false);
+    expect(collector.pendingChats()).toEqual(['c1', 'c2']);
+    expect(reported).toEqual([
+      'Finished chats were not delivered to the Manager: the Manager’s home host did not answer. Patch will try again.',
+    ]);
+    nowMs += RETRY_AFTER_FAILURE_MS;
     expect(collector.tick()).toBe(true);
+    expect(ids(1)).toEqual(['c1', 'c2']);
+  });
+
+  test('a chat running again when a failed delivery is retried is left out of the retry', () => {
+    settings = { ...settings, managerWake: 'each' };
+    finish('c1');
+    emit(state('c1', { activity: 'running' }));
+    collector.onResult({ runId: 'run-0', delivered: 0, error: 'boom', recorded: true });
+    expect(collector.pendingChats()).toEqual(['c1']);
+    nowMs += RETRY_AFTER_FAILURE_MS;
+    expect(collector.tick()).toBe(false);
+    expect(delivered).toHaveLength(1);
+  });
+
+  test('a refused delivery keeps its chats; the thread already says so, so no notification', () => {
+    finish('c1');
+    nowMs += 30 * 60_000;
+    collector.tick();
+    finish('c2');
+    collector.onResult({ runId: 'run-0', delivered: 0, error: 'boom', recorded: true });
+    expect(collector.pendingChats()).toEqual(['c1', 'c2']);
+    expect(reported).toEqual([]);
+    // Batched: the retry does not wait for the next interval, only the pause.
+    expect(collector.tick()).toBe(false);
+    nowMs += RETRY_AFTER_FAILURE_MS;
+    expect(collector.tick()).toBe(true);
+    expect(ids(1)).toEqual(['c1', 'c2']);
+    collector.onResult({ runId: 'run-1', delivered: 2 });
+    expect(collector.pendingChats()).toEqual([]);
+  });
+
+  test('a failure the thread could not record is notified, once per run of failures', () => {
+    settings = { ...settings, managerWake: 'each' };
+    finish('c1');
+    collector.onResult({
+      runId: 'run-0',
+      delivered: 0,
+      error: 'this host does not run the Manager',
+    });
+    nowMs += RETRY_AFTER_FAILURE_MS;
+    collector.tick();
+    collector.onResult({
+      runId: 'run-1',
+      delivered: 0,
+      error: 'this host does not run the Manager',
+    });
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toContain('this host does not run the Manager');
+    expect(collector.pendingChats()).toEqual(['c1']);
+  });
+
+  test('a delivery that cannot be sent at all keeps its chats', () => {
+    settings = { ...settings, managerWake: 'each' };
+    collector = make({
+      deliver: () => {
+        throw new Error('the Manager has no home host');
+      },
+    });
+    finish('c1');
+    expect(collector.pendingChats()).toEqual(['c1']);
+    expect(reported[0]).toContain('the Manager has no home host');
+  });
+
+  test('a failed delivery to a Manager disabled meanwhile is not kept', () => {
+    settings = { ...settings, managerWake: 'each' };
+    finish('c1');
+    emit(spawned(SPECIAL_THREAD_IDS.manager));
+    emit(state(SPECIAL_THREAD_IDS.manager, { disabled: true }));
+    collector.onResult({ runId: 'run-0', delivered: 0, error: 'the Manager is disabled' });
+    expect(collector.pendingChats()).toEqual([]);
+    expect(reported).toEqual([]);
   });
 
   test('an offline home host keeps the chats for when it is back', () => {
@@ -151,6 +249,75 @@ describe('ManagerFinishedCollector', () => {
     emit(state('c1', { activity: 'running' }));
     nowMs += 31 * 60_000;
     expect(collector.tick()).toBe(false);
+  });
+
+  test('an idle chat whose goal is met or given up counts as finished', () => {
+    emit(spawned('g1'));
+    emit(state('g1', { activity: 'running', goal: 'Ship it' }));
+    emit(state('g1', { activity: 'idle', goal: 'Ship it' }));
+    expect(collector.pendingChats()).toEqual([]);
+    // The host clears the goal in a later frame, the chat already idle.
+    emit(state('g1', { activity: 'idle', goal: null }));
+    expect(collector.pendingChats()).toEqual(['g1']);
+    // A goal cleared while it is still running is not finished.
+    emit(spawned('g2'));
+    emit(state('g2', { activity: 'running', goal: 'More' }));
+    emit(state('g2', { activity: 'running', goal: null }));
+    expect(collector.pendingChats()).toEqual(['g1']);
+  });
+
+  test('at delivery every check is run again: snoozed, hidden, archived, deleted, running, goal', () => {
+    for (const id of ['ok', 'snoozed', 'hidden', 'archived', 'deleted', 'running', 'goal']) {
+      finish(id);
+    }
+    emit(state('snoozed', { snoozedUntil: nowMs + 60 * 60_000 }));
+    emit(state('hidden', { hidden: true }));
+    emit(state('archived', { status: 'archived' }));
+    emit(state('deleted', { status: 'deleted' }));
+    emit(state('running', { activity: 'running' }));
+    emit(state('goal', { goal: 'Keep going' }));
+    nowMs += 31 * 60_000;
+    collector.tick();
+    expect(ids(0)).toEqual(['ok']);
+  });
+
+  test('names the host, and an unnamed chat by its folder’s last part', () => {
+    finish('c1');
+    collector.sendNow();
+    expect(delivered[0]!.chats[0]).toMatchObject({ name: 'c1', hostName: 'Studio Mac' });
+  });
+
+  test('pending chats and the batch clock survive a restart', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'mf-')), 'manager-finished.json');
+    collector = make({ path });
+    finish('c1');
+    finish('c2');
+    nowMs += 10 * 60_000;
+    collector = make({ path });
+    expect(collector.pendingChats()).toEqual(['c1', 'c2']);
+    // The clock kept running: 20 more minutes is the interval, not 30.
+    nowMs += 20 * 60_000;
+    expect(collector.tick()).toBe(true);
+    expect(ids(0)).toEqual(['c1', 'c2']);
+    // Unconfirmed when the server stops: still there after it starts.
+    collector = make({ path });
+    expect(collector.pendingChats()).toEqual(['c1', 'c2']);
+    expect(existsSync(`${path}.tmp`)).toBe(false);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ version: 1 });
+  });
+
+  test('an unreadable file is logged and the collector starts empty', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'mf-')), 'manager-finished.json');
+    writeFileSync(path, '{not json');
+    const errors: string[] = [];
+    collector = make({
+      path,
+      logger: { info: () => {}, warn: () => {}, error: (_o: unknown, m: string) => errors.push(m) },
+    } as Partial<ManagerFinishedDeps>);
+    expect(collector.pendingChats()).toEqual([]);
+    expect(errors).toEqual(['manager-finished: pending chats file is unreadable, starting empty']);
+    finish('c1');
+    expect(JSON.parse(readFileSync(path, 'utf8')).pending).toEqual(['c1']);
   });
 
   test('a chat given a goal after it finished is dropped at delivery', () => {
