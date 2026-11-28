@@ -46,6 +46,7 @@ describe('the acp provider', () => {
       disableNativeTools: false,
       interrupt: true,
       steer: false,
+      systemPrompt: false,
     });
     expect(HARNESS_TRAITS.acp.detachedTurnRunner).toBe(true);
   });

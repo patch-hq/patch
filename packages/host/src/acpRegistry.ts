@@ -88,6 +88,7 @@ export function declaredCapabilities(caps: AcpAgentCapabilities): ProviderCapabi
     // `session/cancel` is part of every ACP agent.
     interrupt: true,
     steer: false,
+    systemPrompt: false,
   };
 }
 

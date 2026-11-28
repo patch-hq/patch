@@ -62,6 +62,7 @@ import {
   deriveSnoozeOutcome,
   openSnoozeRecord,
   providerDescriptor,
+  providerForModel,
   forkPointIndex,
   type BranchEntry,
   retiredModelNotice,
@@ -71,7 +72,6 @@ import {
   DEFAULT_LIMIT_BEHAVIOUR,
   isOutboxEvent,
   isAnthropicApiKey,
-  parseAcpModel,
   type LimitBehaviour,
   type ReminderEvery,
 } from '@patch/wire';
@@ -1835,6 +1835,7 @@ const CAPABILITY_ACTION: Record<ProviderCapability, string> = {
   disableNativeTools: "switching off the provider's native tools",
   interrupt: 'interrupting a turn',
   steer: 'adding input to a running turn',
+  systemPrompt: 'a system prompt',
 };
 
 export class EffortNotSupportedError extends Error {
@@ -11166,7 +11167,7 @@ export class Daemon {
       );
     }
     const targetHarness = this.harnessOf(chatId);
-    if (chatId === SPECIAL_THREAD_IDS.manager && targetHarness === 'acp') {
+    if (chatId === SPECIAL_THREAD_IDS.manager && !modelHasCapability(state.model, 'systemPrompt')) {
       this.noteManagerPromptNotApplied(chatId, state.model);
     }
     // A session made by another provider cannot be resumed here: a chat whose
@@ -16904,8 +16905,8 @@ export class Daemon {
   }
 
   /**
-   * An ACP agent takes no system prompt, so the Manager prompt does not reach
-   * it (spec/06 § Manager prompt and folder). Said in the Manager's thread
+   * A provider that takes no system prompt (an ACP agent) is never given the
+   * Manager prompt (spec/06 § Manager prompt and folder). Said in the Manager's thread
    * once per session, not on every turn: the flag is cleared whenever the
    * session is.
    */
@@ -16914,12 +16915,12 @@ export class Daemon {
     const meta = this.opts.metaStore.read(chatId);
     if (!meta || meta.managerPromptNoted === true) return;
     this.opts.metaStore.update(chatId, (m) => ({ ...m, managerPromptNoted: true }));
-    const agent = parseAcpModel(model)?.agentId ?? model ?? 'the agent';
+    const provider = providerDescriptor(providerForModel(model)).label;
     this.emit({
       type: 'chat.message',
       chatId,
       role: 'system',
-      content: `Manager prompt not applied · ${agent} takes no system prompt`,
+      content: `Manager prompt not applied · ${provider} takes no system prompt`,
       seq: this.bumpSeq(chatId),
       createdAt: this.opts.now(),
     });
