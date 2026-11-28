@@ -25,6 +25,12 @@ test.describe('Manager view', () => {
     await expect(page.getByTestId('reach-switch')).toBeVisible();
   });
 
+  test('keeps the Notify / Auto-notify reach switch in its header', async ({ page }) => {
+    await page.goto(MANAGER);
+    await expect(page.getByTestId('reach-switch')).toBeVisible();
+    await expect(page.getByTestId('reach-switch')).toHaveText(/Notify/);
+  });
+
   test('has a Manager settings gear beside Zen that opens Settings → Manager', async ({ page }) => {
     await page.goto(MANAGER);
     const gear = page.getByTestId('action-manager-settings');
