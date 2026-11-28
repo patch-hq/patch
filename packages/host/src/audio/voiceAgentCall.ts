@@ -82,6 +82,8 @@ export class VoiceAgentCall {
   /** The session is set up: context and pushes can be sent. */
   private live = false;
   private closed = false;
+  /** The device's line is up. While it is not, nothing is pushed to be spoken. */
+  private lineIsUp = true;
   /** Waiting for the line to go quiet after the voice's goodbye (`untilGoodbyeHeard`). */
   private goodbyeWaiter: (() => void) | null = null;
   /** Catch-ups that arrived before the session was set up. */
@@ -176,9 +178,15 @@ export class VoiceAgentCall {
     this.flush();
   }
 
+  /** The device's line went quiet or came back; pushes held meanwhile go out on its return. */
+  setLine(up: boolean): void {
+    this.lineIsUp = up;
+    if (up) this.flush();
+  }
+
   /** Send the oldest push if the line is quiet. Providers call this whenever it may have gone quiet. */
   flush(): void {
-    if (this.closed || !this.live || !this.engine) return;
+    if (this.closed || !this.live || !this.engine || !this.lineIsUp) return;
     if (this.goodbyeWaiter && this.engine.isIdle()) {
       const w = this.goodbyeWaiter;
       this.goodbyeWaiter = null;

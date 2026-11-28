@@ -538,12 +538,12 @@ describe('voiceController', () => {
     expect(sound.mock.calls).toEqual([['ended']]);
   });
 
-  it('a call that drops redials by itself, telling the host it is picking the call back up', async () => {
+  it('a call that drops redials by itself, naming the session it was on so the host resumes it', async () => {
     vi.useFakeTimers();
     try {
-      const opened: Array<{ resumed?: boolean }> = [];
+      const opened: Array<{ resumes?: string }> = [];
       __setAudioOpenerForTests(async (o) => {
-        opened.push({ ...(o.resumed !== undefined ? { resumed: o.resumed } : {}) });
+        opened.push({ ...(o.resumes !== undefined ? { resumes: o.resumes } : {}) });
         return stubOpener(o);
       });
       await startVoiceCall('c1');
@@ -552,7 +552,7 @@ describe('voiceController', () => {
       expect(useVoiceStore.getState().call).not.toBeNull();
       expect(useVoiceStore.getState().call?.phase).toBe('connecting');
       await vi.advanceTimersByTimeAsync(CALL_REDIAL_DELAYS_MS[0] ?? 0);
-      expect(opened).toEqual([{}, { resumed: true }]);
+      expect(opened).toEqual([{}, { resumes: 'sess-1' }]);
       expect(useVoiceStore.getState().call).not.toBeNull();
     } finally {
       vi.useRealTimers();

@@ -860,6 +860,10 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.call.push(text, opts);
   }
 
+  setLine(up: boolean): void {
+    this.call.setLine(up);
+  }
+
   /** Not a note engine — this class only backs `role: 'voice-call'` (audio/server.ts). */
   async finalizeNote(): Promise<boolean> {
     return false;

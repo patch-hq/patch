@@ -366,14 +366,16 @@ async function placeCall(
   let firstDial: Promise<void> = Promise.resolve();
   const l: CallLine = new CallLine(
     {
-      dial: (attempt, resumed) => {
+      dial: (attempt, resumes) => {
         // A redial goes to the chat the call is on now: the voice agent may have switched it.
         const onChat = useVoiceStore.getState().call?.chatId ?? chatId;
         const opening = openCallSession(l, attempt, onChat, deps, {
           takeOver: opts.takeOver === true && attempt === 1,
-          resumed,
+          resumes,
           // Never repeated on a redial: the voice already opened with it.
-          ...(opts.callReason !== undefined && !resumed ? { callReason: opts.callReason } : {}),
+          ...(opts.callReason !== undefined && resumes === null
+            ? { callReason: opts.callReason }
+            : {}),
         });
         if (attempt === 1) firstDial = opening;
       },
@@ -458,7 +460,7 @@ async function openCallSession(
   attempt: number,
   chatId: string,
   deps: AudioSessionDeps | undefined,
-  opts: { takeOver: boolean; resumed: boolean; callReason?: string },
+  opts: { takeOver: boolean; resumes: string | null; callReason?: string },
 ): Promise<void> {
   const addressWord = addressWordOrNull();
   const current = (): boolean => line === l && l.isCurrent(attempt);
@@ -469,7 +471,7 @@ async function openCallSession(
       mode: useVoiceStore.getState().call?.mode ?? 'call',
       ...(addressWord !== null ? { addressWord } : {}),
       ...(opts.takeOver ? { takeOver: true } : {}),
-      ...(opts.resumed ? { resumed: true } : {}),
+      ...(opts.resumes !== null ? { resumes: opts.resumes } : {}),
       ...(opts.callReason !== undefined ? { callReason: opts.callReason } : {}),
       deps: deps ?? {},
       callbacks: {
@@ -672,7 +674,7 @@ export function pauseVoiceCall(reason: PauseReason = 'button'): void {
 
 /**
  * Resume a paused call: a new session on the same chat with a fresh start
- * context, so a resume is not a redial (`resumed` stays off — nothing dropped).
+ * context, so a resume is not a redial (`resumes` stays off — nothing dropped).
  */
 export async function resumeVoiceCall(deps?: AudioSessionDeps): Promise<void> {
   const store = useVoiceStore.getState();

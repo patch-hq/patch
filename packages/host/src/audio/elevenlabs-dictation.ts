@@ -205,4 +205,7 @@ export class ElevenLabsDictationSession implements VoiceSessionLike {
     };
   }
   pushMessage(): void {}
+
+  /** A session with no voice agent holds nothing for the line (only app calls are held). */
+  setLine(): void {}
 }

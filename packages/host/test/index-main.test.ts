@@ -1474,6 +1474,7 @@ describe('src/index.ts main() — full host boot', () => {
       );
       // Hung up straight after the reply: the call's line lands at once, costing
       // the voice engine alone.
+      ws.send(JSON.stringify({ type: 'audio.session_end' }));
       ws.close();
 
       await waitFor(

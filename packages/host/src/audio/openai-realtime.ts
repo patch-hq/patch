@@ -832,6 +832,10 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     return { backend: 'openai', model: this.deps.model, tokens: this.tokens, stt: null };
   }
 
+  setLine(up: boolean): void {
+    this.call.setLine(up);
+  }
+
   pushMessage(text: string, opts: { handoffSettled?: boolean } = {}): void {
     // The chat's activity is its history: not for someone who may not hear it.
     if (!this.historyAllowed() && opts.handoffSettled !== true) {

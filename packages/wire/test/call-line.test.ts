@@ -52,7 +52,7 @@ class FakeClock implements CallLineClock {
 }
 
 class Surface implements CallLineSurface {
-  dials: Array<{ attempt: number; resumed: boolean }> = [];
+  dials: Array<{ attempt: number; resumes: string | null }> = [];
   hungUp: number[] = [];
   sent: Array<{ attempt: number; frame: AudioHeartbeatEvent | AudioCallLogEvent }> = [];
   phases: Array<{ next: CallLinePhase; prev: CallLinePhase; reason?: string }> = [];
@@ -61,8 +61,8 @@ class Surface implements CallLineSurface {
   stillTrying(reason: string): void {
     this.tries.push(reason);
   }
-  dial(attempt: number, resumed: boolean): void {
-    this.dials.push({ attempt, resumed });
+  dial(attempt: number, resumes: string | null): void {
+    this.dials.push({ attempt, resumes });
   }
   hangUp(attempt: number): void {
     this.hungUp.push(attempt);
@@ -106,7 +106,7 @@ beforeEach(() => {
 describe('placing a call', () => {
   test('dials once, and is live when the host acknowledges it', () => {
     line.start();
-    expect(surface.dials).toEqual([{ attempt: 1, resumed: false }]);
+    expect(surface.dials).toEqual([{ attempt: 1, resumes: null }]);
     expect(line.phase).toBe('connecting');
     line.acked(1, 's1');
     expect(line.phase).toBe('live');
@@ -140,14 +140,14 @@ describe('placing a call', () => {
 });
 
 describe('a dropped call comes back', () => {
-  test('a live line that closes redials on the schedule, as a resumed call', () => {
+  test('a live line that closes redials on the schedule, asking for its session back', () => {
     live();
     line.lost(1, 'connection_closed', 'the audio connection closed');
     expect(line.phase).toBe('reconnecting');
     clock.advance(CALL_REDIAL_DELAYS_MS[0]! - 1);
     expect(surface.dials).toHaveLength(1);
     clock.advance(1);
-    expect(surface.dials.at(-1)).toEqual({ attempt: 2, resumed: true });
+    expect(surface.dials.at(-1)).toEqual({ attempt: 2, resumes: 's1' });
     line.acked(2, 's2');
     expect(surface.phases.map((p) => p.next)).toEqual(['live', 'reconnecting', 'live']);
     expect(surface.phases.at(-1)?.prev).toBe('reconnecting');
@@ -160,7 +160,7 @@ describe('a dropped call comes back', () => {
     for (const delay of CALL_REDIAL_DELAYS_MS) {
       clock.advance(delay);
       attempt += 1;
-      expect(surface.dials.at(-1)).toEqual({ attempt, resumed: true });
+      expect(surface.dials.at(-1)).toEqual({ attempt, resumes: 's1' });
       line.lost(attempt, 'connection_closed', 'still down');
     }
     expect(surface.tries).toEqual(['still down']);
@@ -173,6 +173,19 @@ describe('a dropped call comes back', () => {
     expect(line.phase).toBe('reconnecting');
   });
 
+  test('every redial names the session the call was last live on, however many fail', () => {
+    live();
+    line.lost(1, 'connection_closed', 'closed');
+    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    line.lost(2, 'connection_closed', 'still down');
+    clock.advance(CALL_REDIAL_DELAYS_MS[1]!);
+    expect(surface.dials.map((d) => d.resumes)).toEqual([null, 's1', 's1']);
+    line.acked(3, 's3');
+    line.lost(3, 'signal_lost', 'nothing from the host for 3006ms');
+    clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
+    expect(surface.dials.at(-1)?.resumes).toBe('s3');
+  });
+
   test('a redial the host never answers is hung up and tried again', () => {
     live();
     line.lost(1, 'connection_closed', 'closed');
@@ -181,7 +194,7 @@ describe('a dropped call comes back', () => {
     expect(surface.hungUp).toEqual([2]);
     expect(line.phase).toBe('reconnecting');
     clock.advance(CALL_REDIAL_DELAYS_MS[1]!);
-    expect(surface.dials.at(-1)).toEqual({ attempt: 3, resumed: true });
+    expect(surface.dials.at(-1)).toEqual({ attempt: 3, resumes: 's1' });
   });
 
   test('the schedule starts again after the line comes back', () => {
@@ -193,7 +206,7 @@ describe('a dropped call comes back', () => {
     line.acked(3, 's3');
     line.lost(3, 'connection_closed', 'closed');
     clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
-    expect(surface.dials.at(-1)).toEqual({ attempt: 4, resumed: true });
+    expect(surface.dials.at(-1)).toEqual({ attempt: 4, resumes: 's3' });
   });
 
   test('coming back to the foreground redials at once', () => {
@@ -202,7 +215,7 @@ describe('a dropped call comes back', () => {
     expect(surface.dials).toHaveLength(1);
     line.lost(1, 'connection_closed', 'closed');
     line.foreground();
-    expect(surface.dials.at(-1)).toEqual({ attempt: 2, resumed: true });
+    expect(surface.dials.at(-1)).toEqual({ attempt: 2, resumes: 's1' });
     clock.advance(CALL_REDIAL_DELAYS_MS[0]!);
     expect(surface.dials).toHaveLength(2);
   });

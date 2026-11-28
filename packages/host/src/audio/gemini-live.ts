@@ -1146,6 +1146,10 @@ export class GeminiLiveSession implements VoiceSessionLike {
     this.call.push(text, opts);
   }
 
+  setLine(up: boolean): void {
+    this.call.setLine(up);
+  }
+
   /** Answer one tool call. `WHEN_IDLE` lets the model finish what it is saying first. */
   private answerTool(
     callId: string,

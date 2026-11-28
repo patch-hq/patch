@@ -42,6 +42,12 @@ interface CallInfo {
   resumed?: boolean;
 }
 
+/** The user ending the call: the surface says so, then closes. A bare close is a drop. */
+const hangUp = (ws: WebSocket): void => {
+  ws.send(encodeAudio({ type: 'audio.session_end' }));
+  ws.close();
+};
+
 let server: (AudioServerHandle & { port: number }) | undefined;
 afterEach(async () => {
   await server?.close();
@@ -73,7 +79,7 @@ async function openCall(
     surfaceId: string;
     chatId: string;
     takeOver?: boolean;
-    resumed?: boolean;
+    resumes?: string;
     kind?: 'web' | 'mobile';
   },
 ): Promise<{ ws: WebSocket; closed: Promise<string> }> {
@@ -98,7 +104,7 @@ async function openCall(
       surfaceHasAec: true,
       mode: 'call',
       ...(o.takeOver ? { takeOver: true } : {}),
-      ...(o.resumed ? { resumed: true } : {}),
+      ...(o.resumes !== undefined ? { resumes: o.resumes } : {}),
     }),
   );
   return { ws, closed };
@@ -118,12 +124,12 @@ describe('call handoff', () => {
     expect(calls).toMatchObject([
       { sessionId: 's1', surfaceId: 'phone', surfaceKind: 'mobile', chatId: 'c1', active: true },
     ]);
-    a.ws.close();
+    hangUp(a.ws);
     await wait(60);
     expect(calls.map((c) => c.active)).toEqual([true, false]);
   });
 
-  test('a redialled call is announced as resumed, so the host can say so in the chat', async () => {
+  test('a redial of a call the host no longer holds opens a new one, announced as resumed so the host can say so in the chat', async () => {
     const calls: CallInfo[] = [];
     const s = await start(calls);
     const first = await openCall(s.port, {
@@ -133,14 +139,14 @@ describe('call handoff', () => {
       kind: 'mobile',
     });
     await wait(60);
-    first.ws.close();
+    hangUp(first.ws);
     await wait(60);
     const again = await openCall(s.port, {
       sessionId: 's2',
       surfaceId: 'phone',
       chatId: 'c1',
       kind: 'mobile',
-      resumed: true,
+      resumes: 's1',
     });
     await wait(60);
     expect(calls[0]?.resumed).toBeUndefined();
@@ -169,7 +175,7 @@ describe('call handoff', () => {
         startedAt: expect.any(Number),
       },
     ]);
-    a.ws.close();
+    hangUp(a.ws);
     await wait(60);
     expect(s.liveCalls()).toEqual([]);
   });

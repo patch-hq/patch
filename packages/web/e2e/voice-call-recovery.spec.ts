@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 // `audio.session_start` with a turn state and a heartbeat every 200 ms. The
 // first session's heartbeats stop after a few, as a line that has silently
 // gone dead does. The page must notice on its own (three seconds without one),
-// say Reconnecting…, redial as a resumed call, and once the new session is up
+// say Reconnecting…, redial asking for the same session, and once the new session is up
 // send the log of the drop. Everything above the socket is real: the voice
 // controller, the shared call line, the audio session decoder and the bar.
 
@@ -125,7 +125,7 @@ test('a call whose heartbeat stops says Reconnecting…, redials, and sends the 
   // Every heartbeat was echoed.
   expect(first.filter((f) => f.type === 'audio.heartbeat').map((f) => f.n)).toEqual([0, 1, 2]);
   // The redial says it is the same call, picked back up.
-  expect(second[0]).toMatchObject({ type: 'audio.session_start', resumed: true });
+  expect(second[0]).toMatchObject({ type: 'audio.session_start', resumes: expect.any(String) });
   // The log of the drop went on the new session.
   await expect
     .poll(async () =>

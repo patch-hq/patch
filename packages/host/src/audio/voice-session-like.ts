@@ -77,4 +77,11 @@ export interface VoiceSessionLike {
    * already what the session speaks or writes, so it ignores this.
    */
   pushMessage(text: string, opts?: { handoffSettled?: boolean }): void;
+  /**
+   * spec/07 § A dropped call comes back — the device's line went quiet
+   * (`up: false`) and the session is held for it, or the device is back
+   * (`up: true`). While it is down nothing is spoken: what the voice agent
+   * has to say waits for the line, so no answer is said to nobody.
+   */
+  setLine(up: boolean): void;
 }

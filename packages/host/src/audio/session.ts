@@ -403,6 +403,9 @@ export class VoiceSession implements VoiceSessionLike {
   /** No voice agent on `local`: every utterance already is the agent's turn, and its reply is spoken. */
   pushMessage(): void {}
 
+  /** A session with no voice agent holds nothing for the line (only app calls are held). */
+  setLine(): void {}
+
   /**
    * What the session actually did, logged when it closes. A call the user says
    * "didn't work" about is otherwise a pair of log lines with nothing between

@@ -177,7 +177,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
   };
   const sockets: WebSocket[] = [];
   /** Pick up a call on `chatId` from a web surface; resolves once Gemini is on the line. */
-  const call = async (chatId: string, resumed = false) => {
+  const call = async (chatId: string, resumes?: string) => {
     const sessionId = `s-${randomUUID()}`;
     const ws = new WebSocket(`ws://127.0.0.1:${server!.port}/audio/${sessionId}`);
     sockets.push(ws);
@@ -197,10 +197,10 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
         role: 'voice-call',
         token: mintToken(sessionId, chatId),
         surfaceHasAec: true,
-        ...(resumed ? { resumed: true } : {}),
+        ...(resumes !== undefined ? { resumes } : {}),
       }),
     );
-    if (resumed)
+    if (resumes !== undefined)
       return {
         closed: new Promise<string>((res) =>
           ws.once('close', (_c: number, r: Buffer) => res(r.toString())),
@@ -212,7 +212,10 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
     await vi.waitFor(() => expect(gemini.sent.length).toBeGreaterThan(0));
     return {
       gemini,
-      hangUp: () => ws.close(),
+      hangUp: () => {
+        ws.send(encodeAudio({ type: 'audio.session_end' }));
+        ws.close();
+      },
       /** Resolves with the close reason once the host closes the surface's socket. */
       closed: new Promise<string>((resolve) =>
         ws.once('close', (_code: number, reason: Buffer) => resolve(reason.toString())),
@@ -463,7 +466,7 @@ describe('a voice call, end to end', () => {
     c.gemini.say({ toolCall: { functionCalls: [{ id: 'e1', name: 'end_call', args: {} }] } });
     c.gemini.say({ serverContent: { turnComplete: true } });
     await expect(c.closed).resolves.toBe('ended_by_agent');
-    const r = (await w.call(chatId, true)) as {
+    const r = (await w.call(chatId, 'gone')) as {
       closed: Promise<string>;
       geminiCount: () => number;
     };

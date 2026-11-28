@@ -33,6 +33,12 @@ function mintToken(c: { surfaceId: string; sessionId: string; chatId: string }):
   return `${claims}.${sig}`;
 }
 
+/** The user ending the call: the surface says so, then closes. A bare close is a drop. */
+const hangUp = (ws: WebSocket): void => {
+  ws.send(encodeAudio({ type: 'audio.session_end' }));
+  ws.close();
+};
+
 let server: (AudioServerHandle & { port: number }) | undefined;
 afterEach(async () => {
   await server?.close();
@@ -117,7 +123,7 @@ describe('call heartbeat', () => {
       ws.send(encodeAudio({ type: 'audio.heartbeat', sessionId: 's1', n: b.n }));
     await wait(60);
     expect(beats(frames).at(-1)?.rttMs).toEqual(expect.any(Number));
-    ws.close();
+    hangUp(ws);
     await wait(60);
     const ended = logs.find((l) => l.msg === 'audio: session ended');
     expect(ended?.heartbeat).toMatchObject({
@@ -168,7 +174,7 @@ describe('call heartbeat', () => {
       dropped: 3,
     });
     ws.send(encodeAudio({ type: 'audio.call_log', sessionId: 's1', entries: [entries[1]!] }));
-    ws.close();
+    hangUp(ws);
     await wait(60);
     const ended = logs.find((l) => l.msg === 'audio: session ended');
     expect(ended?.callLog).toEqual([...entries, entries[1]]);
