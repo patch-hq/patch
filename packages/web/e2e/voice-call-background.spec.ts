@@ -38,11 +38,11 @@ const BOOT = `
 interface FakeSession {
   sessionId: string;
   sent: Array<Record<string, unknown>>;
-  /** Stop sending heartbeats: the line has silently gone dead. */
-  silence(): void;
+  /** The line drops: heartbeats stop and the socket closes (silence alone never ends a line). */
+  drop(): void;
 }
 
-/** Play the host: answer session_start, then a heartbeat every 200 ms until silenced. */
+/** Play the host: answer session_start, then a heartbeat every 200 ms until the line drops. */
 async function playHost(page: Page): Promise<FakeSession[]> {
   const sessions: FakeSession[] = [];
   await page.routeWebSocket(/\/audio\//, (ws: WebSocketRoute) => {
@@ -50,7 +50,10 @@ async function playHost(page: Page): Promise<FakeSession[]> {
     const session: FakeSession = {
       sessionId: '',
       sent: [],
-      silence: () => clearInterval(timer),
+      drop: () => {
+        clearInterval(timer);
+        void ws.close();
+      },
     };
     sessions.push(session);
     ws.onMessage((data) => {
@@ -70,7 +73,7 @@ async function playHost(page: Page): Promise<FakeSession[]> {
   return sessions;
 }
 
-test('a call in a background tab answers its heartbeats, and resumes a dead line while hidden', async ({
+test('a call in a background tab answers its heartbeats, and resumes a dropped line while hidden', async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -146,8 +149,8 @@ test('a call in a background tab answers its heartbeats, and resumes a dead line
   await page.waitForTimeout(3_000);
   expect(echoes(first) - before).toBeGreaterThanOrEqual(10);
 
-  // The line goes dead while hidden: the page notices and resumes the same session on its own.
-  first.silence();
+  // The line drops while hidden: the page sees the socket close and resumes the same session on its own.
+  first.drop();
   await expect.poll(() => sessions.length, { timeout: 8_000 }).toBe(2);
   const second = sessions[1]!;
   await expect.poll(() => second.sent[0]?.type).toBe('audio.session_start');
