@@ -1,18 +1,10 @@
 // lib/voiceCall.ts — pausing a call (spec/07 § Pause): one paused state reached
 // from the button, the headphones coming out and the silence timeout; and an
 // agent's call opening with its reason. Same harness as voiceCall.test.ts.
-//
-// (Harness notes from voiceCall.test.ts follow.) voiceGestures.test.ts already pins the SYNCHRONOUS
-// overlay-mount guarantee; this file drives the full async setup (token
-// mint → mic permission → TTS sink → audio WS → session_start → mic uplink)
-// and the WS message dispatch table, using the FakeWebSocket test double and
-// mocked native-bridge modules (voiceMic/voiceTts/voiceAudioService — their
-// OWN NativeModules-branch tests live in voiceMic.test.ts / voiceTts.test.ts
-// / voiceAudioService.test.ts; here we only care that voiceCall wires them
-// correctly).
+// The call's native session is the FakeCallTransport double.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
+import { FakeCallTransport } from './testUtils/fakeCallTransport';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
 import type { VoiceServiceAction } from '../src/lib/voiceAudioService';
@@ -63,30 +55,16 @@ vi.mock('../src/lib/voiceAudioService', () => ({
   onVoiceServiceAction: onVoiceServiceActionMock,
 }));
 
-const startMicCaptureMock = vi.fn(async () => undefined);
-const stopMicCaptureMock = vi.fn(async () => undefined);
-vi.mock('../src/lib/voiceMic', () => ({
-  startMicCapture: startMicCaptureMock,
-  stopMicCapture: stopMicCaptureMock,
-}));
-
-const startTtsPlaybackMock = vi.fn(async () => undefined);
-const writeTtsPcmMock = vi.fn();
-const flushTtsPlaybackMock = vi.fn(async () => undefined);
-const stopTtsPlaybackMock = vi.fn(async () => undefined);
-vi.mock('../src/lib/voiceTts', () => ({
-  startTtsPlayback: startTtsPlaybackMock,
-  writeTtsPcm: writeTtsPcmMock,
-  flushTtsPlayback: flushTtsPlaybackMock,
-  stopTtsPlayback: stopTtsPlaybackMock,
-}));
+vi.mock('../src/lib/callTransport', async () =>
+  (await import('./testUtils/fakeCallTransport')).fakeCallTransportModule(),
+);
 
 async function flush(n = 14): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
 }
 
 beforeEach(() => {
-  installFakeWebSocket();
+  FakeCallTransport.reset();
   vi.clearAllMocks();
   meMock.mockResolvedValue({
     account: { accountId: 'acc1', userPublicKey: 'k', createdAt: 0 },
@@ -108,23 +86,18 @@ beforeEach(() => {
   useUiStore.setState({ errors: [] });
 });
 
-afterEach(() => {
-  restoreWebSocket();
-});
-
 type Frame = { type: string; [k: string]: unknown };
-const frames = (ws: FakeWebSocket): Frame[] =>
-  ws.sent.filter((d): d is string => typeof d === 'string').map((d) => JSON.parse(d) as Frame);
+const frames = (ws: FakeCallTransport): Frame[] => ws.sent.map((d) => JSON.parse(d) as Frame);
 
 /** Start a call and bring it live (the host's first state). */
 async function live(
   opts: Parameters<typeof import('../src/lib/voiceCall').startVoiceCall>[2] = {},
   mode: 'call' | 'hands-free' = 'call',
-): Promise<FakeWebSocket> {
+): Promise<FakeCallTransport> {
   const { startVoiceCall } = await import('../src/lib/voiceCall');
   startVoiceCall('c1', mode, opts);
   await flush();
-  const ws = FakeWebSocket.last();
+  const ws = FakeCallTransport.last();
   ws.emitOpen();
   await flush();
   ws.emitMessage(JSON.stringify({ type: 'audio.state', sessionId: 'sess-1', state: 'listening' }));
@@ -134,7 +107,7 @@ async function live(
 beforeEach(() => {
   prefs.quiet = 0;
   cues.played = [];
-  FakeWebSocket.reset();
+  FakeCallTransport.reset();
   useVoiceStore.setState({ callPaused: null, callMode: 'call' });
 });
 
@@ -154,7 +127,6 @@ describe('pause', () => {
     expect(st.activeSession?.chatId).toBe('c1');
     expect(frames(ws).at(-1)).toMatchObject({ type: 'audio.session_end', reason: 'paused' });
     expect(ws.close).toHaveBeenCalled();
-    expect(stopMicCaptureMock).toHaveBeenCalled();
     expect(stopVoiceAudioServiceMock).not.toHaveBeenCalled();
     expect(updateVoiceAudioServiceMock).toHaveBeenLastCalledWith(
       'c1',
@@ -167,10 +139,10 @@ describe('pause', () => {
     vi.useFakeTimers();
     await live();
     const { pauseVoiceCall } = await import('../src/lib/voiceCall');
-    const before = FakeWebSocket.instances.length;
+    const before = FakeCallTransport.instances.length;
     pauseVoiceCall();
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(FakeWebSocket.instances.length).toBe(before);
+    expect(FakeCallTransport.instances.length).toBe(before);
     expect(useVoiceStore.getState().callError).toBeNull();
   });
 
@@ -181,7 +153,7 @@ describe('pause', () => {
     startVoiceAudioServiceMock.mockClear();
     resumeVoiceCall();
     await flush();
-    const ws = FakeWebSocket.last();
+    const ws = FakeCallTransport.last();
     ws.emitOpen();
     await flush();
     const start = frames(ws).find((f) => f.type === 'audio.session_start')!;
@@ -204,10 +176,10 @@ describe('pause', () => {
     await live();
     const { pauseVoiceCall } = await import('../src/lib/voiceCall');
     pauseVoiceCall();
-    const before = FakeWebSocket.instances.length;
+    const before = FakeCallTransport.instances.length;
     serviceActionHandler!('resume');
     await flush();
-    expect(FakeWebSocket.instances.length).toBe(before + 1);
+    expect(FakeCallTransport.instances.length).toBe(before + 1);
   });
 
   it('ending a paused call stops the service with the ended cue', async () => {
@@ -226,10 +198,10 @@ describe('headphones', () => {
     await live();
     serviceActionHandler!('headset_removed');
     expect(useVoiceStore.getState().callPaused).toBe('headphones');
-    const before = FakeWebSocket.instances.length;
+    const before = FakeCallTransport.instances.length;
     serviceActionHandler!('headset_added');
     await flush();
-    expect(FakeWebSocket.instances.length).toBe(before + 1);
+    expect(FakeCallTransport.instances.length).toBe(before + 1);
     expect(useVoiceStore.getState().callPaused).toBeNull();
   });
 
@@ -237,10 +209,10 @@ describe('headphones', () => {
     await live();
     const { pauseVoiceCall } = await import('../src/lib/voiceCall');
     pauseVoiceCall();
-    const before = FakeWebSocket.instances.length;
+    const before = FakeCallTransport.instances.length;
     serviceActionHandler!('headset_added');
     await flush();
-    expect(FakeWebSocket.instances.length).toBe(before);
+    expect(FakeCallTransport.instances.length).toBe(before);
     expect(useVoiceStore.getState().callPaused).toBe('button');
   });
 });
@@ -251,7 +223,7 @@ describe('pause when quiet', () => {
     prefs.quiet = 5;
     await live();
     await vi.advanceTimersByTimeAsync(4 * 60_000);
-    FakeWebSocket.last().emitMessage(
+    FakeCallTransport.last().emitMessage(
       JSON.stringify({ type: 'audio.transcript_partial', sessionId: 'sess-1', text: 'hm' }),
     );
     await vi.advanceTimersByTimeAsync(4 * 60_000);
@@ -285,7 +257,7 @@ describe("an agent's call", () => {
     ws.emitClose();
     await vi.advanceTimersByTimeAsync(1_000);
     await flush();
-    const again = FakeWebSocket.last();
+    const again = FakeCallTransport.last();
     expect(again).not.toBe(ws);
     again.emitOpen();
     await flush();

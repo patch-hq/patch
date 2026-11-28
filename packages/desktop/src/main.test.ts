@@ -693,7 +693,9 @@ test('every BrowserWindow disables backgroundThrottling (hidden windows must sti
   // throttling delayed the WS reconnect backoff (api/ws.ts) driving
   // liveUpdate.ts's post-deploy auto-reload, leaving a hidden window on a
   // stale bundle indefinitely — reported by the user needing a manual Cmd+R after
-  // a deploy. Every window that loads the web SPA must opt out.
+  // a deploy. A call open in a hidden or minimised window needs the same (spec/07
+  // § A call keeps going in the background). Every window that loads the web SPA
+  // must opt out.
   const src = readFileSync(join(here, 'main.ts'), 'utf8');
   const factories = [
     ['openChildWindow', 'export function openChildWindow'],

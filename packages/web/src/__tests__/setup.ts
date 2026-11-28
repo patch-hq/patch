@@ -1,7 +1,7 @@
 // Vitest setup — jsdom + jest-dom matchers.
 import { useJobDraftStore } from '../stores/jobDraftStore.js';
 import '@testing-library/jest-dom/vitest';
-import { afterEach, beforeEach } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { useUiStore } from '../stores/uiStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
@@ -65,3 +65,16 @@ afterEach(() => {
   // Unsaved job-form drafts persist per job; none may carry into the next test.
   useJobDraftStore.getState()._reset();
 });
+
+// A call keeps time in a dedicated worker (lib/callClock.ts), which jsdom does
+// not have. Unit tests run the call's clock on the page's own timers instead, so
+// vi.useFakeTimers() drives a call's line as it drives everything else. The
+// worker clock itself is tested in callClock.test.ts and in a real browser in
+// e2e/voice-call-background.spec.ts.
+vi.mock('../lib/callClock.js', () => ({
+  callClock: {
+    now: () => Date.now(),
+    setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+    clearTimeout: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
+  },
+}));

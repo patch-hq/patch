@@ -12,30 +12,17 @@
 // background and upgrade the store to the live session id / audio URL. Any
 // failure releases the audio and keeps the bar up with the error and a Retry — NO FALLBACK.
 //
-// MIC UPLINK (spec/07 § End-to-end voice transport — "Voice call (sustained)").
-// The full inbound leg is wired and device-verifiable: token mint,
-// mic-permission request, Android foreground service, opening the audio WSS, the
-// `audio.session_start` control frame that binds the session, AND — the piece
-// that made "nothing happens when I speak" true — streaming raw mic PCM16 up as
-// interleaved `audio.pcm16` + binary frames. `expo-av` has no per-frame PCM tap
-// (its Recording API only writes a whole file on stop), so capture is done by a
-// custom native module (`PatchVoiceMic` → AudioRecord, src/lib/voiceMic.ts). The
-// host VADs the frames, transcribes each utterance (Whisper) and commits it as
-// a chat turn whose reply streams back into the timeline (spec/07 turn
-// semantics). NO FALLBACK: if the native mic module is absent, or the read loop
-// fails, the call is torn down and the error surfaced — never a live-looking
-// call bar that carries no audio.
-//
-// OUTBOUND AUDIO (spec/07 § End-to-end voice transport — the down leg). Playing
-// the agent's TTS reply out loud is done by a second native module: an
-// AudioTrack streaming sink (`PatchVoiceTts` → src/lib/voiceTts.ts). The host
-// streams Kokoro TTS as `audio.tts_chunk` PCM16 @ 24 kHz mono BINARY frames on
-// the same WS; the `onmessage` handler below feeds each binary frame straight
-// into the sink so the user HEARS the reply as it arrives. Barge-in
-// (`audio.barge_in`) flushes the sink so cut-off audio stops immediately; the
-// live STT `audio.transcript_partial` frames feed the call bar's running
-// transcript. NO FALLBACK: if the sink can't init the call is torn down and the
-// error surfaced — never a live-looking call bar that plays no audio back.
+// THE CALL'S AUDIO (spec/07 § A call keeps going in the background). The
+// session itself — the audio socket, the microphone streaming up it as
+// `audio.pcm16` frames, the echo of every host heartbeat, and playback of the
+// reply's 24 kHz PCM — runs on native threads in the voice service
+// (callTransport.ts → CallTransport.kt), never through this JS: React Native
+// throttles it and stops its timers once the phone is locked or the app is in
+// the background, and a call has to keep going there. This module opens each
+// attempt, reads the host's control frames to drive the call bar and the line,
+// and sends the few control frames JS owns (mode, call log, session end). The
+// line keeps time on the native clock for the same reason. NO FALLBACK: a
+// microphone or player that cannot start fails the call and says why.
 //
 // VOICE ENGINE (spec/07 § Voice — a config matrix). Nothing in this file is
 // specific to the `local` pipeline. `gemini` (Gemini Live) and `openai` (OpenAI
@@ -60,8 +47,13 @@ import {
   type AudioHeartbeatEvent,
   type AudioSessionMode,
 } from '@patch/wire/audio';
-import { answerHeartbeat } from './audioHeartbeat';
 import { CallLine, type CallLinePhase } from '@patch/wire/call-line';
+import {
+  flushCallPlayback,
+  nativeCallClock,
+  openCallTransport,
+  type CallTransport,
+} from './callTransport';
 import { api } from '../api/rest';
 import { audioWsUrl } from '../config';
 import { useVoiceStore, type PauseReason } from '../stores/voiceStore';
@@ -74,7 +66,6 @@ import {
   type VoiceServiceAction,
   type VoiceServiceState,
 } from './voiceAudioService';
-import { startMicCapture, stopMicCapture } from './voiceMic';
 import {
   endDirectCall,
   pauseDirectCall,
@@ -84,7 +75,6 @@ import {
 } from './directCall';
 import { addressWordOrNull, pauseWhenQuietMinutes, voiceAgentOrNull } from './preferences';
 import { callEngineLabel, describeMicSilent, describeVoiceError } from './voiceEngine';
-import { startTtsPlayback, writeTtsPcm, flushTtsPlayback, stopTtsPlayback } from './voiceTts';
 import { ensurePermission } from './permissionGate';
 
 export class VoiceAudioConnectError extends Error {
@@ -102,15 +92,17 @@ export class VoiceAudioConnectError extends Error {
  * opens each attempt's session and plays what the line says.
  */
 let _line: CallLine | null = null;
-let _ws: WebSocket | null = null;
+/** The open attempt's native session, and whether its socket is open. */
+let _call: CallTransport | null = null;
+let _callOpen = false;
 /**
  * The call was answered on its own for an agent (Answer automatically in
  * hands-free): it holds transient audio focus, so the playback it paused
  * resumes when it ends. Kept for the call's life, across a pause.
  */
 let _transientFocus = false;
-/** The attempt `_ws` belongs to. */
-let _wsAttempt = 0;
+/** The attempt `_call` belongs to. */
+let _callAttempt = 0;
 /** Unsubscribe for the notification-button listener, while a session is open. */
 let _serviceActions: (() => void) | null = null;
 
@@ -153,34 +145,41 @@ useVoiceStore.subscribe((s) => {
   void playCallSound('failed');
 });
 
-/** Close the socket of `attempt`, if it is still the open one. */
+/** Close the open attempt's session. */
+function closeCall(): void {
+  const call = _call;
+  _call = null;
+  _callOpen = false;
+  call?.close();
+}
+
+/** Close the session of `attempt`, if it is still the open one. */
 function closeAttempt(attempt: number): void {
-  if (_wsAttempt !== attempt || _ws === null) return;
-  const ws = _ws;
-  _ws = null;
-  ws.close();
+  if (_callAttempt === attempt) closeCall();
+}
+
+/** Send a control frame on the open session; false when there is none. */
+function sendFrame(frame: unknown): boolean {
+  const call = _call;
+  if (call === null || !_callOpen) return false;
+  void call.send(frame).then(
+    (sent) => {
+      if (!sent) console.log(`[patch-voice] call frame not sent: the session has closed`);
+    },
+    (e: unknown) => console.log(`[patch-voice] call frame send failed: ${String(e)}`),
+  );
+  return true;
 }
 
 function sendOn(attempt: number, frame: AudioHeartbeatEvent | AudioCallLogEvent): boolean {
-  const ws = _ws;
-  if (_wsAttempt !== attempt || ws === null || ws.readyState !== WebSocket.OPEN) return false;
-  try {
-    ws.send(JSON.stringify(frame));
-    return true;
-  } catch (e) {
-    console.log(`[patch-voice] call ${frame.type} send failed: ${(e as Error).message}`);
-    return false;
-  }
+  return _callAttempt === attempt && sendFrame(frame);
 }
 
 /** Release every audio resource the call holds; keeps the store. */
 async function releaseAudio(): Promise<void> {
-  _ws?.close();
-  _ws = null;
+  closeCall();
   _serviceActions?.();
   _serviceActions = null;
-  await stopMicCapture().catch(() => undefined);
-  await stopTtsPlayback().catch(() => undefined);
   await stopVoiceAudioService().catch(() => undefined);
 }
 
@@ -192,10 +191,8 @@ function onLinePhase(next: CallLinePhase, prev: CallLinePhase, reason?: string):
     return;
   }
   if (next === 'reconnecting') {
-    // Nothing said while the line is down is kept: the dead attempt's mic and
-    // playback stop here, and the redial starts both afresh.
-    void stopMicCapture().catch(() => undefined);
-    void stopTtsPlayback().catch(() => undefined);
+    // Nothing said while the line is down is kept: the dead attempt's session
+    // took its microphone and playback with it, and the redial starts both afresh.
     st.setCallReconnecting(true);
     st.setCallPhase('connecting');
     return;
@@ -250,32 +247,35 @@ export function startVoiceCall(
   // call bar mounted synchronously in CONNECTING state.
   console.log(`[patch-voice] startVoiceCall chatId=${chatId} bar=connecting`);
   // 2) The line dials, and redials whenever it drops.
-  const line: CallLine = new CallLine({
-    dial: (attempt, resumed) => {
-      // A redial goes to the chat the call is on now: the voice agent may have switched it.
-      const onChat = useVoiceStore.getState().activeSession?.chatId ?? chatId;
-      void openAttempt(line, onChat, attempt, {
-        takeOver: opts.takeOver === true && attempt === 1,
-        resumed,
-        // Never repeated on a redial: the voice already opened with it.
-        ...(opts.callReason !== undefined && !resumed ? { callReason: opts.callReason } : {}),
-        // A paused call kept its service, and a redial never stopped it.
-        serviceUp: opts.resume === true || resumed,
-      });
+  const line: CallLine = new CallLine(
+    {
+      dial: (attempt, resumed) => {
+        // A redial goes to the chat the call is on now: the voice agent may have switched it.
+        const onChat = useVoiceStore.getState().activeSession?.chatId ?? chatId;
+        void openAttempt(line, onChat, attempt, {
+          takeOver: opts.takeOver === true && attempt === 1,
+          resumed,
+          // Never repeated on a redial: the voice already opened with it.
+          ...(opts.callReason !== undefined && !resumed ? { callReason: opts.callReason } : {}),
+          // A paused call kept its service, and a redial never stopped it.
+          serviceUp: opts.resume === true || resumed,
+        });
+      },
+      hangUp: closeAttempt,
+      send: sendOn,
+      phase: onLinePhase,
+      stillTrying: (reason) => {
+        console.log(`[patch-voice] call redial still failing: ${reason}`);
+        useUiStore.getState().pushError(`voice call: ${reason} — still trying`);
+      },
     },
-    hangUp: closeAttempt,
-    send: sendOn,
-    phase: onLinePhase,
-    stillTrying: (reason) => {
-      console.log(`[patch-voice] call redial still failing: ${reason}`);
-      useUiStore.getState().pushError(`voice call: ${reason} — still trying`);
-    },
-  });
+    nativeCallClock,
+  );
   _line = line;
   line.start();
 }
 
-/** Open one attempt's session: token, mic, playback, service, socket. */
+/** Open one attempt's session: token, permission, service, then the native session. */
 async function openAttempt(
   line: CallLine,
   chatId: string,
@@ -312,16 +312,6 @@ async function openAttempt(
       playThroughEarpieceAndroid: false,
     });
     if (!current()) return;
-
-    // Bring up the native AudioTrack sink BEFORE opening the WS so the first
-    // `audio.tts_chunk` binary frame has somewhere to play. NO FALLBACK: a
-    // failed init throws and the outer catch tears the attempt down.
-    await startTtsPlayback();
-    console.log('[patch-voice] call TTS AudioTrack sink started (PatchVoiceTts)');
-    if (!current()) {
-      await stopTtsPlayback().catch(() => undefined);
-      return;
-    }
 
     // Upgrade the call bar to this attempt's session (real id + audio URL).
     // The timer keeps running off the call's own start.
@@ -366,313 +356,226 @@ async function openAttempt(
       return;
     }
 
-    // Open the host audio WSS. The server returns a RELATIVE `/audio/<id>`
-    // path; resolve it to an absolute ws(s):// URL against the audio plane
-    // (same-origin via Caddy in prod; the direct host port in dev).
+    // The session runs natively (callTransport.ts). The server returns a
+    // RELATIVE `/audio/<id>` path, resolved against the audio plane (same-origin
+    // in prod; the direct host port in dev). `audio.session_start` goes the
+    // moment the socket opens, so the host binds the session without waiting on JS.
     const wsUrl = audioWsUrl(tok.audioUrl);
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(wsUrl);
-    } catch (e) {
-      throw new VoiceAudioConnectError(
-        `failed to open audio WS: ${(e as Error).message}`,
-        e as Error,
-      );
-    }
-    _ws = ws;
-    _wsAttempt = attempt;
-    // Receive TTS PCM as raw ArrayBuffers (not Blobs) so we can hand the
-    // bytes straight to the native sink.
-    ws.binaryType = 'arraybuffer';
-
-    // Inbound frames: BINARY = TTS PCM16 @ 24 kHz → play; STRING = JSON
-    // control frame. Mirrors the web surface's audioSession dispatch.
-    // Count TTS binary chunks so the down leg's first-audio arrival is
-    // pinpointable in logcat without spamming it per-chunk.
-    let ttsChunks = 0;
-    ws.onmessage = (evt: WebSocketMessageEvent): void => {
-      const data = evt.data as unknown;
-      if (typeof data !== 'string') {
-        if (data instanceof ArrayBuffer) {
-          // Guard odd byteLength — never assume 2-byte alignment on the wire.
-          const usable = data.byteLength - (data.byteLength % 2);
-          if (ttsChunks === 0) {
-            console.log(
-              `[patch-voice] call FIRST tts_chunk received (${data.byteLength}B) → AudioTrack`,
-            );
-          }
-          ttsChunks++;
-          line.turn('reply_audio');
-          writeTtsPcm(usable === data.byteLength ? data : data.slice(0, usable));
-        }
-        return;
-      }
-      let frame: AudioEvent;
-      try {
-        frame = decodeAudio(data);
-      } catch (e) {
-        useUiStore
-          .getState()
-          .pushError(`voice call: malformed audio frame: ${(e as Error).message}`);
-        return;
-      }
-      switch (frame.type) {
-        case 'audio.heartbeat':
-          answerHeartbeat(ws, frame);
-          line.heartbeat(attempt, frame);
-          break;
-        case 'audio.state':
-          // Daemon-driven turn phase (spec/15 § Voice states) — drives the
-          // call bar's LISTENING → TRANSCRIBING → THINKING → SPEAKING indicator.
-          // The first one that is not `connecting` is the host acknowledging
-          // the session: the line is live.
-          console.log(`[patch-voice] call state → ${frame.state}`);
-          if (frame.state !== 'connecting') {
-            const wasLive = line.phase === 'live';
-            line.acked(attempt, tok.sessionId);
-            // Live, or the agent started speaking: either way the quiet clock restarts.
-            if (!wasLive || frame.state === 'speaking') heardSomething();
-          }
-          if (frame.state === 'transcribing') line.turn('speech_end');
-          useVoiceStore.getState().setCallPhase(frame.state);
-          break;
-        case 'audio.transcript_partial':
-          heardSomething();
-          // Live interim STT — the call bar shows it as the trailing line of the
-          // running transcript until the committed turn lands over the main WS.
-          console.log(`[patch-voice] call transcript_partial: "${frame.text}"`);
-          // The voice model streams faster than real time, so the host calls the
-          // turn finished (tts_end → listening) while seconds of it are still
-          // queued on the phone. The model then has nothing to interrupt and
-          // sends no barge_in, so the user's words must stop the playback here.
-          // Not in hands-free: speech there is not necessarily for Patch.
-          if (
-            useVoiceStore.getState().callPhase === 'listening' &&
-            useVoiceStore.getState().callMode !== 'hands-free'
-          ) {
-            console.log('[patch-voice] call user speech over queued TTS → flush TTS sink');
-            void flushTtsPlayback().catch(() => undefined);
-          }
-          useVoiceStore.getState().setCallPhase('transcribing');
-          useVoiceStore.getState().setCallTranscriptPartial(frame.text);
-          break;
-        case 'audio.transcript_final':
-          heardSomething();
-          // Final for this utterance; the committed user turn arrives as a
-          // normal chat.message, so drop the interim line. The host has moved
-          // to 'thinking' (it emits audio.state), but set it here too so the UI
-          // advances even if that frame is reordered/lost.
-          console.log(`[patch-voice] call transcript_final: "${frame.text}"`);
-          useVoiceStore.getState().setCallTranscriptPartial('');
-          if (frame.addressed === false) {
-            // Heard but not sent (spec/07 § Session modes): no turn is coming,
-            // so the phase goes straight back to listening and the words are
-            // shown greyed rather than vanishing as if the mic were dead.
-            useVoiceStore.getState().setCallUnaddressed(frame.text);
-            useVoiceStore.getState().setCallPhase('listening');
-            break;
-          }
-          line.turn('transcript');
-          useVoiceStore.getState().setCallUnaddressed(null);
-          useVoiceStore.getState().setCallPhase('thinking');
-          break;
-        case 'audio.tts_end':
-          heardSomething();
-          // Speaking finished (or barge-in) → back to listening. This is the
-          // canonical end-of-turn signal; the host does NOT emit an
-          // audio.state after tts_end (see session.ts speak() finally).
-          console.log(
-            `[patch-voice] call tts_end (bargedIn=${frame.bargedIn ?? false}) → listening`,
-          );
-          line.turn('reply_end');
-          useVoiceStore.getState().setCallPhase('listening');
-          break;
-        case 'audio.barge_in':
-          // User spoke over the agent — cut local playback immediately.
-          console.log('[patch-voice] call barge_in → flush TTS sink');
-          useVoiceStore.getState().setCallPhase('listening');
-          void flushTtsPlayback().catch(() => undefined);
-          break;
-        case 'audio.passed_to_agent':
-          void playCallSound('passed-to-agent');
-          break;
-        case 'audio.chat_switched': {
-          // The voice agent moved the call (spec/07 § A call stays on its chat):
-          // the bar, the notification and any redial follow it.
-          const st = useVoiceStore.getState();
-          if (st.activeSession) {
-            st.upgradeActive({ ...st.activeSession, chatId: frame.chatId });
-            void updateVoiceAudioService(frame.chatId, serviceState()).catch(() => undefined);
-          }
-          break;
-        }
-        case 'audio.error': {
-          // A failure the call carries on through (a catch-up, a voice tool): said, not fatal.
-          if (AUDIO_NOTICE_CODES.has(frame.code)) {
-            console.log(`[patch-voice] call notice ${frame.code}: ${frame.message}`);
-            useUiStore.getState().pushError(`voice call: ${frame.message}`);
-            break;
-          }
-          // LOUD + visible: the call bar names it. A hosted engine's failure
-          // (`gemini_unavailable` / `openai_unavailable`) names the engine.
-          console.log(`[patch-voice] call audio.error ${frame.code}: ${frame.message}`);
-          // The host went away under the call (it restarted, or the server
-          // lost it): the line is lost, not failed (spec/07 § A dropped call
-          // comes back).
-          if (frame.code === 'host_unreachable') {
-            line.lost(attempt, 'host_unreachable', describeVoiceError(frame.code, frame.message));
-            break;
-          }
-          // Every other error is one the host ends the call on.
-          if (frame.code === 'mic_silent') {
-            line.fail(attempt, frame.message);
-            // Say what to do about it, once the permission is checked.
-            void describeMicSilent(frame.message, {
-              has: async () => (await Audio.getPermissionsAsync()).granted,
-              ask: () => ensurePermission('microphone'),
-            })
-              .then((text) => useVoiceStore.getState().setError(text))
-              .catch((e: unknown) =>
-                useVoiceStore.getState().setError(`microphone check failed: ${String(e)}`),
-              );
-            break;
-          }
-          line.fail(attempt, describeVoiceError(frame.code, frame.message));
-          break;
-        }
-        default:
-          // tts_chunk / session_* are handled by the binary path or are not
-          // surface-actionable here.
-          break;
-      }
+    const start = {
+      type: 'audio.session_start' as const,
+      sessionId: tok.sessionId,
+      accountId: me.account.accountId,
+      surfaceId: me.surface.surfaceId,
+      surfaceKind: 'mobile' as const,
+      chatId,
+      role: 'voice-call' as const,
+      token: tok.token,
+      // The phone's microphone runs the platform echo cancel; the host bypasses its own.
+      surfaceHasAec: true,
+      mode: useVoiceStore.getState().callMode,
+      ...(addressWord !== null ? { addressWord } : {}),
+      ...(opts.takeOver ? { takeOver: true } : {}),
+      ...(opts.resumed ? { resumed: true } : {}),
+      ...(opts.callReason !== undefined ? { callReason: opts.callReason } : {}),
     };
-
-    // On open, send the `audio.session_start` control frame so the host
-    // verifies the token and BINDS the session (spec/07, wire/audio).
-    ws.onopen = (): void => {
-      console.log(`[patch-voice] call audio WSS OPEN ${wsUrl}`);
-      const start = {
-        type: 'audio.session_start' as const,
-        sessionId: tok.sessionId,
-        accountId: me.account.accountId,
-        surfaceId: me.surface.surfaceId,
-        surfaceKind: 'mobile' as const,
-        chatId,
-        role: 'voice-call' as const,
-        token: tok.token,
-        // Android voice path uses hardware AEC; host bypasses its own.
-        surfaceHasAec: true,
-        mode: useVoiceStore.getState().callMode,
-        ...(addressWord !== null ? { addressWord } : {}),
-        ...(opts.takeOver ? { takeOver: true } : {}),
-        ...(opts.resumed ? { resumed: true } : {}),
-        ...(opts.callReason !== undefined ? { callReason: opts.callReason } : {}),
-      };
-      try {
-        ws.send(JSON.stringify(start));
-      } catch (e) {
-        // Written off first, so the close it causes is not a second drop.
-        line.lost(
-          attempt,
-          'connection_closed',
-          `audio session_start failed: ${(e as Error).message}`,
-        );
-        closeAttempt(attempt);
-        return;
-      }
-      console.log('[patch-voice] call session_start sent; starting mic capture (PatchVoiceMic)');
-
-      // Stream mic PCM16 up as interleaved `audio.pcm16` + binary frames.
-      // This is the leg whose absence made speaking do nothing: the host's
-      // onMicFrame → VAD → Whisper → turn chain only runs once frames arrive.
-      let frameCount = 0;
-      void startMicCapture(
-        (pcm: Int16Array): void => {
-          // Bail if the attempt was replaced, the socket closed, or the user
-          // muted — muting stops sending frames (the native mic keeps
-          // running; we just don't forward, so the host hears silence).
-          if (!current() || ws.readyState !== WebSocket.OPEN) return;
-          if (useVoiceStore.getState().callMuted) return;
-          try {
-            ws.send(
-              JSON.stringify({
-                type: 'audio.pcm16',
-                ts: Date.now(),
-                sampleRate: 16000,
-                samples: pcm.length,
-              }),
-            );
-            ws.send(pcm.buffer as ArrayBuffer);
-          } catch (e) {
-            line.lost(
-              attempt,
-              'connection_closed',
-              `mic frame send failed: ${(e as Error).message}`,
-            );
-            closeAttempt(attempt);
-            return;
-          }
-          frameCount++;
-          if (frameCount === 1) {
-            console.log('[patch-voice] call FIRST mic frame sent up (mic uplink live)');
-          } else if (frameCount % 50 === 0) {
-            // ~2s cadence at 40ms frames — proves the uplink keeps flowing
-            // without spamming logcat.
-            console.log(`[patch-voice] call streamed ${frameCount} mic frames up`);
-          }
+    let replies = 0;
+    // The open event can arrive before openCallTransport resolves.
+    let opened = false;
+    let call: CallTransport;
+    try {
+      call = await openCallTransport(wsUrl, start, {
+        onOpen: () => {
+          opened = true;
+          if (_call !== null && _callAttempt === attempt) _callOpen = true;
+          console.log(`[patch-voice] call session open ${wsUrl}; session_start sent, mic opening`);
         },
-        (message: string): void => {
-          // Native read loop failed mid-call. LOUD + visible in the call bar,
-          // not just a toast — never a live-looking call that hears nothing.
-          console.log(`[patch-voice] call mic read loop FAILED: ${message}`);
+        onFrame: (text) => onHostFrame(line, attempt, tok.sessionId, text),
+        onReplyAudio: (bytes) => {
+          if (replies++ === 0) console.log(`[patch-voice] call first reply audio (${bytes}B)`);
+          line.turn('reply_audio');
+        },
+        onMicError: (message) => {
+          // LOUD + visible in the call bar — never a live-looking call that hears nothing.
+          console.log(`[patch-voice] call microphone FAILED: ${message}`);
           line.fail(attempt, `mic failed: ${message}`);
         },
-        (reason, detail): void => {
+        onAudioStopped: (reason, detail) => {
           // The phone's own audio stopped under a live line: log why.
           console.log(`[patch-voice] call audio stopped (${reason}): ${detail}`);
           line.audioStopped(reason, detail);
         },
-      ).catch((e: unknown) => {
-        // Missing native module / AudioRecord init failure.
-        console.log(`[patch-voice] call mic capture START FAILED: ${(e as Error).message}`);
-        line.fail(attempt, `mic unavailable: ${(e as Error).message}`);
+        onClose: ({ reason, error }) => {
+          if (_callAttempt === attempt) {
+            _call = null;
+            _callOpen = false;
+          }
+          if (!current()) return;
+          // spec/07 § A call can move between devices — the host closed this
+          // session because the call was taken over elsewhere, or the agent hung
+          // up. Neither is a failure: end the call here.
+          if (reason === 'transferred' || reason === 'ended_by_agent') {
+            void endVoiceCall();
+            return;
+          }
+          line.lost(
+            attempt,
+            'connection_closed',
+            error === null
+              ? 'Call dropped — the audio connection closed'
+              : `Call dropped — audio connection error: ${error}`,
+          );
+        },
       });
-    };
-    // An error always precedes its close; keep its detail for the close,
-    // which is where the line hears that the attempt is gone.
-    let wsErrorDetail: string | null = null;
-    ws.onerror = (e: Event): void => {
-      wsErrorDetail = `audio WS error: ${(e as Event).type ?? 'unknown'}`;
-      console.log(`[patch-voice] call ${wsErrorDetail}`);
-    };
-    ws.onclose = (ev?: { reason?: string }): void => {
-      if (_ws === ws) _ws = null;
-      if (!current()) return;
-      // Stop the mic AND the TTS sink so we don't keep capturing into — or
-      // playing from — a dead socket.
-      void stopMicCapture().catch(() => undefined);
-      void stopTtsPlayback().catch(() => undefined);
-      // spec/07 § A call can move between devices — the host closed this
-      // session because the call was taken over elsewhere, or the agent hung
-      // up. Neither is a failure: end the call here.
-      if (ev?.reason === 'transferred' || ev?.reason === 'ended_by_agent') {
-        void endVoiceCall();
-        return;
-      }
-      line.lost(
-        attempt,
-        'connection_closed',
-        wsErrorDetail === null
-          ? 'Call dropped — the audio connection closed'
-          : `Call dropped — ${wsErrorDetail}`,
+    } catch (e) {
+      throw new VoiceAudioConnectError(
+        `failed to open the call's audio session: ${(e as Error).message}`,
+        e as Error,
       );
-    };
+    }
+    if (!current()) {
+      call.close();
+      return;
+    }
+    _call = call;
+    _callAttempt = attempt;
+    _callOpen = opened;
   } catch (e) {
     if (!current()) return;
     // Setup failed (token / permission / TTS-init / WS-open). A first dial
     // has failed and says why; a redial tries again (the line decides).
     console.log(`[patch-voice] call setup FAILED: ${(e as Error).message}`);
     line.lost(attempt, 'connection_closed', (e as Error).message);
+  }
+}
+
+/**
+ * A control frame from the host on `attempt`'s session. The heartbeat has
+ * already been answered natively; here it feeds the line.
+ */
+function onHostFrame(line: CallLine, attempt: number, sessionId: string, text: string): void {
+  let frame: AudioEvent;
+  try {
+    frame = decodeAudio(text);
+  } catch (e) {
+    useUiStore.getState().pushError(`voice call: malformed audio frame: ${(e as Error).message}`);
+    return;
+  }
+  switch (frame.type) {
+    case 'audio.heartbeat':
+      line.heartbeat(attempt, frame);
+      break;
+    case 'audio.state':
+      // Daemon-driven turn phase (spec/15 § Voice states) — drives the call
+      // bar's LISTENING → TRANSCRIBING → THINKING → SPEAKING indicator. The
+      // first one that is not `connecting` is the host acknowledging the
+      // session: the line is live.
+      console.log(`[patch-voice] call state → ${frame.state}`);
+      if (frame.state !== 'connecting') {
+        const wasLive = line.phase === 'live';
+        line.acked(attempt, sessionId);
+        // Live, or the agent started speaking: either way the quiet clock restarts.
+        if (!wasLive || frame.state === 'speaking') heardSomething();
+      }
+      if (frame.state === 'transcribing') line.turn('speech_end');
+      useVoiceStore.getState().setCallPhase(frame.state);
+      break;
+    case 'audio.transcript_partial':
+      heardSomething();
+      // Live interim STT — the call bar shows it as the trailing line of the
+      // running transcript until the committed turn lands over the main WS.
+      // The voice model streams faster than real time, so the host calls the
+      // turn finished (tts_end → listening) while seconds of it are still
+      // queued on the phone. The model then has nothing to interrupt and sends
+      // no barge_in, so the user's words must stop the playback here. Not in
+      // hands-free: speech there is not necessarily for Patch.
+      if (
+        useVoiceStore.getState().callPhase === 'listening' &&
+        useVoiceStore.getState().callMode !== 'hands-free'
+      ) {
+        console.log('[patch-voice] call user speech over queued reply → flush playback');
+        flushCallPlayback();
+      }
+      useVoiceStore.getState().setCallPhase('transcribing');
+      useVoiceStore.getState().setCallTranscriptPartial(frame.text);
+      break;
+    case 'audio.transcript_final':
+      heardSomething();
+      // Final for this utterance; the committed user turn arrives as a normal
+      // chat.message, so drop the interim line. The host has moved to
+      // 'thinking' (it emits audio.state), but set it here too so the UI
+      // advances even if that frame is reordered or lost.
+      useVoiceStore.getState().setCallTranscriptPartial('');
+      if (frame.addressed === false) {
+        // Heard but not sent (spec/07 § Session modes): no turn is coming, so
+        // the phase goes straight back to listening and the words are shown
+        // greyed rather than vanishing as if the mic were dead.
+        useVoiceStore.getState().setCallUnaddressed(frame.text);
+        useVoiceStore.getState().setCallPhase('listening');
+        break;
+      }
+      line.turn('transcript');
+      useVoiceStore.getState().setCallUnaddressed(null);
+      useVoiceStore.getState().setCallPhase('thinking');
+      break;
+    case 'audio.tts_end':
+      heardSomething();
+      // Speaking finished (or barge-in) → back to listening: the canonical
+      // end-of-turn signal (the host emits no audio.state after tts_end).
+      line.turn('reply_end');
+      useVoiceStore.getState().setCallPhase('listening');
+      break;
+    case 'audio.barge_in':
+      // The user spoke over the agent; the native session has already cut playback.
+      useVoiceStore.getState().setCallPhase('listening');
+      break;
+    case 'audio.passed_to_agent':
+      void playCallSound('passed-to-agent');
+      break;
+    case 'audio.chat_switched': {
+      // The voice agent moved the call (spec/07 § A call stays on its chat):
+      // the bar, the notification and any redial follow it.
+      const st = useVoiceStore.getState();
+      if (st.activeSession) {
+        st.upgradeActive({ ...st.activeSession, chatId: frame.chatId });
+        void updateVoiceAudioService(frame.chatId, serviceState()).catch(() => undefined);
+      }
+      break;
+    }
+    case 'audio.error': {
+      // A failure the call carries on through (a catch-up, a voice tool): said, not fatal.
+      if (AUDIO_NOTICE_CODES.has(frame.code)) {
+        console.log(`[patch-voice] call notice ${frame.code}: ${frame.message}`);
+        useUiStore.getState().pushError(`voice call: ${frame.message}`);
+        break;
+      }
+      // LOUD + visible: the call bar names it. A hosted engine's failure names the engine.
+      console.log(`[patch-voice] call audio.error ${frame.code}: ${frame.message}`);
+      // The host went away under the call (it restarted, or the server lost
+      // it): the line is lost, not failed (spec/07 § A dropped call comes back).
+      if (frame.code === 'host_unreachable') {
+        line.lost(attempt, 'host_unreachable', describeVoiceError(frame.code, frame.message));
+        break;
+      }
+      // Every other error is one the host ends the call on.
+      if (frame.code === 'mic_silent') {
+        line.fail(attempt, frame.message);
+        // Say what to do about it, once the permission is checked.
+        void describeMicSilent(frame.message, {
+          has: async () => (await Audio.getPermissionsAsync()).granted,
+          ask: () => ensurePermission('microphone'),
+        })
+          .then((t) => useVoiceStore.getState().setError(t))
+          .catch((e: unknown) =>
+            useVoiceStore.getState().setError(`microphone check failed: ${String(e)}`),
+          );
+        break;
+      }
+      line.fail(attempt, describeVoiceError(frame.code, frame.message));
+      break;
+    }
+    default:
+      // session_* are not surface-actionable here.
+      break;
   }
 }
 
@@ -701,12 +604,8 @@ export function setCallMode(next: AudioSessionMode): void {
     () => undefined,
   );
   const sessionId = store.activeSession.sessionId;
-  if (_ws === null || _ws.readyState !== WebSocket.OPEN || sessionId === '') return;
-  try {
-    _ws.send(JSON.stringify({ type: 'audio.mode', sessionId, mode: next }));
-  } catch (e) {
-    useVoiceStore.getState().setError(`mode change failed: ${(e as Error).message}`);
-  }
+  if (sessionId === '') return;
+  sendFrame({ type: 'audio.mode', sessionId, mode: next });
 }
 
 export async function endVoiceCall(): Promise<void> {
@@ -722,19 +621,12 @@ export async function endVoiceCall(): Promise<void> {
     void playCallSound('ended');
   }
   const sessionId = useVoiceStore.getState().activeSession?.sessionId;
-  try {
-    _ws?.send(JSON.stringify({ type: 'audio.session_end', ...(sessionId ? { sessionId } : {}) }));
-  } catch {
-    // The WS may already be closed; closing below is the source of truth.
-    // (This is bounded send-on-shutdown — not silently dropping a real error.)
-  }
-  _ws?.close();
-  _ws = null;
+  // Said if the session is still open; closing it below is what ends it either way.
+  sendFrame({ type: 'audio.session_end', ...(sessionId ? { sessionId } : {}) });
+  closeCall();
   _serviceActions?.();
   _serviceActions = null;
   await endDirectCall();
-  await stopMicCapture().catch(() => undefined);
-  await stopTtsPlayback().catch(() => undefined);
   try {
     await stopVoiceAudioService();
   } catch (e) {
@@ -760,10 +652,6 @@ export async function retryVoiceCall(): Promise<void> {
   const mode = st.callMode;
   await endVoiceCall();
   startVoiceCall(session.chatId, mode);
-}
-
-export function audioWs(): WebSocket | null {
-  return _ws;
 }
 
 /** The service's view of the call as it stands, with any field about to change. */
@@ -823,22 +711,13 @@ export function pauseVoiceCall(reason: PauseReason = 'button'): void {
   _line?.end();
   _line = null;
   clearQuietTimer();
-  try {
-    _ws?.send(
-      JSON.stringify({
-        type: 'audio.session_end',
-        ...(session.sessionId ? { sessionId: session.sessionId } : {}),
-        reason: 'paused',
-      }),
-    );
-  } catch {
-    // The socket may already be closed; closing below is the source of truth.
-  }
-  _ws?.close();
-  _ws = null;
+  sendFrame({
+    type: 'audio.session_end',
+    ...(session.sessionId ? { sessionId: session.sessionId } : {}),
+    reason: 'paused',
+  });
+  closeCall();
   void pauseDirectCall();
-  void stopMicCapture().catch(() => undefined);
-  void stopTtsPlayback().catch(() => undefined);
   store.setCallPaused(reason);
   store.setCallReconnecting(false);
   store.setCallTranscriptPartial('');
@@ -895,10 +774,11 @@ export function startDirectVoiceCall(chatId: string): Promise<void> {
  * word heard or spoken restarts the clock. Hands-free is left alone: it is a
  * line left open on purpose and never ends itself on silence.
  */
-let _quietTimer: ReturnType<typeof setTimeout> | null = null;
+// On the call's native clock: the phone is usually locked when the call goes quiet.
+let _quietTimer: unknown = null;
 
 function clearQuietTimer(): void {
-  if (_quietTimer !== null) clearTimeout(_quietTimer);
+  if (_quietTimer !== null) nativeCallClock.clearTimeout(_quietTimer);
   _quietTimer = null;
 }
 
@@ -908,7 +788,7 @@ function heardSomething(): void {
   const st = useVoiceStore.getState();
   if (minutes === 0 || st.activeSession === null || st.callPaused !== null) return;
   if (st.callMode !== 'call') return;
-  _quietTimer = setTimeout(() => {
+  _quietTimer = nativeCallClock.setTimeout(() => {
     _quietTimer = null;
     // A reply still playing is not silence; look again once it has finished.
     if (useVoiceStore.getState().callPhase === 'speaking') {

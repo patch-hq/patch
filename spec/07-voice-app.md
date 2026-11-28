@@ -222,6 +222,12 @@ Switch here opens a normal call on that chat with `takeOver: true` on `audio.ses
 
 End hangs the call up wherever it is held: the host closes that session as the user ending it, and the device holding it plays the ended sound and clears its bar.
 
+## A call keeps going in the background
+
+A call carries on whatever the device does around it: on the phone with the screen off, the phone locked or the app in the background, and on web and desktop with the window hidden or minimised or the tab in the background. This holds on every provider and for every kind of call — a voice agent call in either mode, and a direct call. Only the user, the voice agent or a real drop ends it.
+
+So nothing that keeps a call alive waits on code the platform slows down in the background. On the phone the call's session — the audio socket, the microphone streaming up it, the answer to every heartbeat and the playback of the reply — runs in the voice foreground service on its own threads, and the app's JavaScript only drives it and shows it; the line's own timing (the heartbeat's three seconds, the redial backoff, Pause when quiet) is kept by the service too, and the service holds the CPU awake while a call is not paused. On web and desktop the heartbeat is answered the moment it arrives, and the line's timing is kept in a worker, which a hidden tab does not throttle; the desktop app also turns off its windows' background throttling.
+
 ## A dropped call comes back
 
 While a voice agent call is open the host sends a heartbeat on the audio socket every second (it does on every app audio session, and every session answers it: § Fixed timings). A surface that has heard nothing from the host for about 3 seconds (three missed heartbeats, so one late frame is not a drop) treats the line as lost, as it does a closed audio connection or the host going away mid-call (`host_unreachable`) during a server or host restart or a network change. The host only ends a call on its own when it moves to another device (`transferred`), when the agent ends it (`ended_by_agent`) or after an error it has already reported, so every other close is a drop.

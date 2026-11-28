@@ -1,16 +1,18 @@
 // lib/voiceCall.ts — the sustained voice-CALL session (spec/07 § End-to-end
 // voice transport). voiceGestures.test.ts already pins the SYNCHRONOUS
-// overlay-mount guarantee; this file drives the full async setup (token
-// mint → mic permission → TTS sink → audio WS → session_start → mic uplink)
-// and the WS message dispatch table, using the FakeWebSocket test double and
-// mocked native-bridge modules (voiceMic/voiceTts/voiceAudioService — their
-// OWN NativeModules-branch tests live in voiceMic.test.ts / voiceTts.test.ts
-// / voiceAudioService.test.ts; here we only care that voiceCall wires them
-// correctly).
+// overlay-mount guarantee; this file drives the full async setup (token mint →
+// mic permission → audio service → the native session, which sends
+// session_start on open) and the host-frame dispatch table, using the
+// FakeCallTransport double for the native session (its microphone, heartbeat
+// echo and playback are native: CallTransport.kt, CallFramesTest.kt).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { micNeedsPrompt } from './testUtils/permissionPrompt';
-import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
+import {
+  FakeCallTransport,
+  flushCallPlaybackMock,
+  openCallTransportMock,
+} from './testUtils/fakeCallTransport';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
 
@@ -46,42 +48,21 @@ vi.mock('../src/lib/voiceAudioService', () => ({
   onVoiceServiceAction: onVoiceServiceActionMock,
 }));
 
-let micOnFrame: ((pcm: Int16Array) => void) | undefined;
-let micOnError: ((message: string) => void) | undefined;
-const startMicCaptureMock = vi.fn(
-  async (onFrame: (pcm: Int16Array) => void, onError: (message: string) => void) => {
-    micOnFrame = onFrame;
-    micOnError = onError;
-  },
-);
-const stopMicCaptureMock = vi.fn(async () => undefined);
 const playCallSoundMock = vi.fn(async () => undefined);
 vi.mock('../src/lib/callSounds', () => ({
   playCallSound: playCallSoundMock,
   syncCallSoundLoop: vi.fn(),
 }));
-vi.mock('../src/lib/voiceMic', () => ({
-  startMicCapture: startMicCaptureMock,
-  stopMicCapture: stopMicCaptureMock,
-}));
-
-const startTtsPlaybackMock = vi.fn(async () => undefined);
-const writeTtsPcmMock = vi.fn();
-const flushTtsPlaybackMock = vi.fn(async () => undefined);
-const stopTtsPlaybackMock = vi.fn(async () => undefined);
-vi.mock('../src/lib/voiceTts', () => ({
-  startTtsPlayback: startTtsPlaybackMock,
-  writeTtsPcm: writeTtsPcmMock,
-  flushTtsPlayback: flushTtsPlaybackMock,
-  stopTtsPlayback: stopTtsPlaybackMock,
-}));
+vi.mock('../src/lib/callTransport', async () =>
+  (await import('./testUtils/fakeCallTransport')).fakeCallTransportModule(),
+);
 
 async function flush(n = 14): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
 }
 
 beforeEach(() => {
-  installFakeWebSocket();
+  FakeCallTransport.reset();
   vi.clearAllMocks();
   meMock.mockResolvedValue({
     account: { accountId: 'acc1', userPublicKey: 'k', createdAt: 0 },
@@ -92,10 +73,6 @@ beforeEach(() => {
     sessionId: 'sess-1',
     audioUrl: '/audio/sess-1',
     expiresAt: 0,
-  });
-  startMicCaptureMock.mockImplementation(async (onFrame, onError) => {
-    micOnFrame = onFrame;
-    micOnError = onError;
   });
   useVoiceStore.setState({
     activeSession: null,
@@ -108,16 +85,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  restoreWebSocket();
+  FakeCallTransport.reset();
 });
 
 describe('startVoiceCall — happy path', () => {
-  it('mints a token, opens the audio WS, sends session_start, and starts mic uplink', async () => {
+  it('mints a token, opens the native session, which sends session_start on open', async () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
     expect(voiceTokenMock).toHaveBeenCalledWith('c1', 'voice-call');
-    expect(startTtsPlaybackMock).toHaveBeenCalled();
     expect(useVoiceStore.getState().activeSession).toMatchObject({
       sessionId: 'sess-1',
       audioUrl: '/audio/sess-1',
@@ -129,11 +105,11 @@ describe('startVoiceCall — happy path', () => {
       transientFocus: false,
     });
 
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     expect(sock.url).toContain('/audio/sess-1');
     sock.emitOpen();
     await flush();
-    const start = JSON.parse(sock.sent[0] as string);
+    const start = JSON.parse(sock.sent[0]!);
     expect(start).toMatchObject({
       type: 'audio.session_start',
       sessionId: 'sess-1',
@@ -143,29 +119,26 @@ describe('startVoiceCall — happy path', () => {
       role: 'voice-call',
       token: 'tok1',
     });
-    expect(startMicCaptureMock).toHaveBeenCalled();
   });
 
   it('takeOver goes on session_start only when the call is a switch from another device', async () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1', 'call', { takeOver: true });
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
-    expect(JSON.parse(sock.sent[0] as string).takeOver).toBe(true);
+    expect(JSON.parse(sock.sent[0]!).takeOver).toBe(true);
   });
 
   it('a close with reason "transferred" ends the call quietly instead of reporting it dropped', async () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
-    (sock as unknown as { onclose: (e: { reason: string }) => void }).onclose({
-      reason: 'transferred',
-    });
+    sock.emitClose(1000, 'transferred');
     await flush();
     expect(useVoiceStore.getState().activeSession).toBeNull();
     expect(useVoiceStore.getState().callError).toBeNull();
@@ -175,10 +148,10 @@ describe('startVoiceCall — happy path', () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
-    (sock as unknown as { onclose: (e: { reason: string }) => void }).onclose({ reason: '' });
+    sock.emitClose(1000, '');
     expect(useVoiceStore.getState().callError).toMatch(/Call dropped/);
   });
 
@@ -186,87 +159,45 @@ describe('startVoiceCall — happy path', () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
-    expect('takeOver' in JSON.parse(sock.sent[0] as string)).toBe(false);
+    expect('takeOver' in JSON.parse(sock.sent[0]!)).toBe(false);
   });
 
-  it('forwards a captured mic frame as a pcm16 header + binary frame', async () => {
+  it('a microphone failure reported by the native session fails the call, loudly', async () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
-    await flush();
-    sock.sent.length = 0;
-    micOnFrame!(new Int16Array([1, 2, 3]));
-    expect(sock.sent.length).toBe(2);
-    const header = JSON.parse(sock.sent[0] as string);
-    expect(header).toMatchObject({ type: 'audio.pcm16', sampleRate: 16000, samples: 3 });
+    sock.emitMessage({ type: 'audio.state', sessionId: 'sess-1', state: 'listening' });
+    sock.emitMicError('AudioRecord.read returned -3');
+    expect(useVoiceStore.getState().callError).toMatch(/mic failed: AudioRecord.read returned -3/);
+    expect(
+      useUiStore.getState().errors.some((e) => e.message.includes('AudioRecord.read returned -3')),
+    ).toBe(true);
   });
 
-  it('does not forward a mic frame while muted', async () => {
-    const { startVoiceCall } = await import('../src/lib/voiceCall');
+  it("muting is the service's: the notification is updated and the native session reads it", async () => {
+    const { startVoiceCall, setCallMuted } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
-    sock.emitOpen();
-    await flush();
-    useVoiceStore.getState().setMuted(true);
-    sock.sent.length = 0;
-    micOnFrame!(new Int16Array([1]));
-    expect(sock.sent.length).toBe(0);
-  });
-
-  it('a send failure while forwarding a mic frame sets a call error', async () => {
-    const { startVoiceCall } = await import('../src/lib/voiceCall');
-    startVoiceCall('c1');
-    await flush();
-    const sock = FakeWebSocket.last();
-    sock.emitOpen();
-    await flush();
-    sock.send.mockImplementationOnce(() => {
-      throw new Error('socket gone');
-    });
-    micOnFrame!(new Int16Array([1]));
-    expect(useVoiceStore.getState().callError).toMatch(/mic frame send failed/);
-  });
-
-  it('a mid-stream mic read failure (onError) sets a call error + pushes a UI error', async () => {
-    const { startVoiceCall } = await import('../src/lib/voiceCall');
-    startVoiceCall('c1');
-    await flush();
-    FakeWebSocket.last().emitOpen();
-    await flush();
-    micOnError!('AudioRecord died');
-    expect(useVoiceStore.getState().callError).toMatch(/mic failed: AudioRecord died/);
-    expect(useUiStore.getState().errors.some((e) => e.message.includes('AudioRecord died'))).toBe(
-      true,
+    FakeCallTransport.last().emitOpen();
+    setCallMuted(true);
+    expect(updateVoiceAudioServiceMock).toHaveBeenCalledWith(
+      'c1',
+      expect.objectContaining({ muted: true }),
     );
   });
 
-  it('a mic-capture start failure (native module missing) sets a call error', async () => {
-    startMicCaptureMock.mockRejectedValueOnce(new Error('native module missing'));
+  it('the first audio of a reply is a turn mark; nothing else of it reaches JS', async () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    FakeWebSocket.last().emitOpen();
-    await flush();
-    expect(useVoiceStore.getState().callError).toMatch(/mic unavailable/);
-  });
-
-  it('logs the 50th frame milestone without sending extra frames', async () => {
-    const { startVoiceCall } = await import('../src/lib/voiceCall');
-    startVoiceCall('c1');
-    await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
-    await flush();
-    sock.sent.length = 0; // drop the session_start frame — count only mic frames
-    for (let i = 0; i < 50; i++) micOnFrame!(new Int16Array([1]));
-    // 2 sends per frame (header + binary) * 50 frames.
-    expect(sock.sent.length).toBe(100);
+    expect(() => sock.emitReplyAudio(9600)).not.toThrow();
   });
 });
 
@@ -291,14 +222,12 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
     });
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
-    // The catch block awaits stopMicCapture/stopTtsPlayback/stopVoiceAudioService
-    // (all mocked async) before setError — more microtask hops than a fixed
-    // flush() count reliably covers, so poll instead of guessing a tick count.
+    // More microtask hops than a fixed flush() count reliably covers, so poll.
     await vi.waitFor(() => expect(useVoiceStore.getState().callError).toMatch(/empty audioUrl/));
     expect(useUiStore.getState().errors.some((e) => e.message.includes('voice call:'))).toBe(true);
   });
 
-  it('a denied mic permission surfaces an error and tears down TTS/mic/audio-service', async () => {
+  it('a denied mic permission surfaces an error and tears down the audio service', async () => {
     const { Audio } = await import('expo-av');
     micNeedsPrompt();
     vi.spyOn(Audio, 'requestPermissionsAsync').mockResolvedValueOnce({ granted: false });
@@ -307,37 +236,18 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
     await vi.waitFor(() =>
       expect(useVoiceStore.getState().callError).toMatch(/mic permission denied/),
     );
-    expect(stopMicCaptureMock).toHaveBeenCalled();
-    expect(stopTtsPlaybackMock).toHaveBeenCalled();
     expect(stopVoiceAudioServiceMock).toHaveBeenCalled();
   });
 
-  it('a TTS sink start failure tears the call down with an error', async () => {
-    startTtsPlaybackMock.mockRejectedValueOnce(new Error('AudioTrack init failed'));
+  it('a native session that cannot start (no playback device) fails the call naming why', async () => {
+    openCallTransportMock.mockRejectedValueOnce(new Error('AudioTrack failed to initialise'));
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await vi.waitFor(() =>
-      expect(useVoiceStore.getState().callError).toMatch(/AudioTrack init failed/),
+      expect(useVoiceStore.getState().callError).toMatch(
+        /failed to open the call's audio session: AudioTrack failed to initialise/,
+      ),
     );
-  });
-
-  it('a WebSocket constructor failure surfaces a VoiceAudioConnectError message', async () => {
-    const RealWS = globalThis.WebSocket;
-    class ThrowingWS {
-      constructor() {
-        throw new Error('ENOTFOUND');
-      }
-    }
-    globalThis.WebSocket = ThrowingWS as unknown as typeof WebSocket;
-    try {
-      const { startVoiceCall } = await import('../src/lib/voiceCall');
-      startVoiceCall('c1');
-      await vi.waitFor(() =>
-        expect(useVoiceStore.getState().callError).toMatch(/failed to open audio WS/),
-      );
-    } finally {
-      globalThis.WebSocket = RealWS;
-    }
   });
 
   it('a call ended (gen bump) during token mint bails without opening a WS', async () => {
@@ -357,7 +267,7 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
     await endVoiceCall(); // bumps _callGen before the token mint resolves
     resolveToken({ token: 't', sessionId: 's', audioUrl: '/audio/s', expiresAt: 0 });
     await flush();
-    expect(FakeWebSocket.instances.length).toBe(0);
+    expect(FakeCallTransport.instances.length).toBe(0);
   });
 
   it('a call ended during the mic-permission wait bails before touching audio setup', async () => {
@@ -378,11 +288,10 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
     await endVoiceCall(); // bumps _callGen while the permission prompt is still open
     resolvePerm({ granted: true });
     await flush();
-    expect(startTtsPlaybackMock).not.toHaveBeenCalled();
-    expect(FakeWebSocket.instances.length).toBe(0);
+    expect(FakeCallTransport.instances.length).toBe(0);
   });
 
-  it('a call ended during the audio-mode setup bails before starting the TTS sink', async () => {
+  it('a call ended during the audio-mode setup bails before opening the session', async () => {
     let resolveMode!: () => void;
     const { Audio } = await import('expo-av');
     vi.spyOn(Audio, 'setAudioModeAsync').mockReturnValueOnce(
@@ -396,8 +305,7 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
     await endVoiceCall();
     resolveMode();
     await flush();
-    expect(startTtsPlaybackMock).not.toHaveBeenCalled();
-    expect(FakeWebSocket.instances.length).toBe(0);
+    expect(FakeCallTransport.instances.length).toBe(0);
   });
 
   it('a setup failure from an already-superseded call is silently dropped (outer catch gen-check)', async () => {
@@ -420,36 +328,34 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
     expect(useUiStore.getState().errors).toHaveLength(0);
   });
 
-  it('a mic frame arriving after the call ended (stale gen) is dropped, not forwarded', async () => {
+  it('an event from a session that has been ended changes nothing', async () => {
     const { startVoiceCall, endVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
-    await flush();
     await endVoiceCall();
-    sock.sent.length = 0; // drop endVoiceCall's own session_end send
-    // The mic module still holds the OLD onFrame closure (nothing unsubscribed
-    // it synchronously) — a frame arriving after teardown must be a no-op.
-    expect(() => micOnFrame!(new Int16Array([1]))).not.toThrow();
-    expect(sock.sent.length).toBe(0);
+    expect(sock.close).toHaveBeenCalled();
+    expect(() => sock.emitMicError('late')).not.toThrow();
+    expect(useVoiceStore.getState().callError).toBeNull();
   });
 
-  it('a call ended during TTS start tears the just-started TTS sink down', async () => {
-    let resolveTts!: () => void;
-    startTtsPlaybackMock.mockReturnValueOnce(
-      new Promise<void>((r) => {
-        resolveTts = r;
-      }),
-    );
+  it('a call ended while its session opened closes the session it was given', async () => {
+    let resolveOpen!: () => void;
+    openCallTransportMock.mockImplementationOnce(async (url, start, handlers) => {
+      const t = new FakeCallTransport(url, start, handlers);
+      await new Promise<void>((r) => {
+        resolveOpen = r;
+      });
+      return { send: t.send, close: t.close };
+    });
     const { startVoiceCall, endVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
-    await vi.waitFor(() => expect(startTtsPlaybackMock).toHaveBeenCalled());
+    await vi.waitFor(() => expect(openCallTransportMock).toHaveBeenCalled());
     await endVoiceCall();
-    resolveTts();
+    resolveOpen();
     await flush();
-    expect(stopTtsPlaybackMock).toHaveBeenCalled();
-    expect(FakeWebSocket.instances.length).toBe(0);
+    expect(FakeCallTransport.last().close).toHaveBeenCalled();
   });
 
   it('a call ended during the audio-service start tears the service down', async () => {
@@ -466,7 +372,7 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
     resolveSvc();
     await flush();
     expect(stopVoiceAudioServiceMock).toHaveBeenCalled();
-    expect(FakeWebSocket.instances.length).toBe(0);
+    expect(FakeCallTransport.instances.length).toBe(0);
   });
 
   it('the overlay timer keeps running off the original startedAt if activeSession vanished mid-setup (?? Date.now() fallback)', async () => {
@@ -483,36 +389,15 @@ describe('startVoiceCall — setup failures (NO FALLBACK, overlay stays up with 
 });
 
 describe('audio WS message dispatch', () => {
-  async function openCall(): Promise<FakeWebSocket> {
+  async function openCall(): Promise<FakeCallTransport> {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
     return sock;
   }
-
-  it('a binary tts_chunk frame is forwarded to the TTS sink', async () => {
-    const sock = await openCall();
-    const buf = new Uint8Array([1, 2, 3, 4]).buffer;
-    sock.emitMessage(buf);
-    expect(writeTtsPcmMock).toHaveBeenCalledWith(buf);
-  });
-
-  it('an odd-length binary frame is truncated to an even byte length', async () => {
-    const sock = await openCall();
-    const buf = new Uint8Array([1, 2, 3]).buffer; // 3 bytes — odd
-    sock.emitMessage(buf);
-    const forwarded = writeTtsPcmMock.mock.calls.at(-1)![0] as ArrayBuffer;
-    expect(forwarded.byteLength).toBe(2);
-  });
-
-  it('a non-ArrayBuffer, non-string message is ignored', async () => {
-    const sock = await openCall();
-    expect(() => sock.emitMessage(12345)).not.toThrow();
-    expect(writeTtsPcmMock).not.toHaveBeenCalled();
-  });
 
   it('audio.state updates the call phase', async () => {
     const sock = await openCall();
@@ -555,21 +440,21 @@ describe('audio WS message dispatch', () => {
     expect(useVoiceStore.getState().callPhase).toBe('listening');
   });
 
-  it('audio.barge_in sets phase=listening and flushes the TTS sink', async () => {
+  it('audio.barge_in sets phase=listening (the native session has cut playback itself)', async () => {
     const sock = await openCall();
     sock.emitMessage(JSON.stringify({ type: 'audio.barge_in', sessionId: 'sess-1', at: 0 }));
     expect(useVoiceStore.getState().callPhase).toBe('listening');
-    expect(flushTtsPlaybackMock).toHaveBeenCalled();
+    expect(flushCallPlaybackMock).not.toHaveBeenCalled();
   });
 
   it('user speech after tts_end flushes the TTS audio still queued on the phone', async () => {
     const sock = await openCall();
     sock.emitMessage(JSON.stringify({ type: 'audio.tts_end', sessionId: 'sess-1' }));
-    flushTtsPlaybackMock.mockClear();
+    flushCallPlaybackMock.mockClear();
     sock.emitMessage(
       JSON.stringify({ type: 'audio.transcript_partial', sessionId: 'sess-1', text: 'no wait' }),
     );
-    expect(flushTtsPlaybackMock).toHaveBeenCalledTimes(1);
+    expect(flushCallPlaybackMock).toHaveBeenCalledTimes(1);
     expect(useVoiceStore.getState().callPhase).toBe('transcribing');
   });
 
@@ -578,11 +463,11 @@ describe('audio WS message dispatch', () => {
     sock.emitMessage(
       JSON.stringify({ type: 'audio.state', sessionId: 'sess-1', state: 'speaking' }),
     );
-    flushTtsPlaybackMock.mockClear();
+    flushCallPlaybackMock.mockClear();
     sock.emitMessage(
       JSON.stringify({ type: 'audio.transcript_partial', sessionId: 'sess-1', text: 'late' }),
     );
-    expect(flushTtsPlaybackMock).not.toHaveBeenCalled();
+    expect(flushCallPlaybackMock).not.toHaveBeenCalled();
   });
 
   it('audio.error sets a call error and pushes a UI error', async () => {
@@ -663,78 +548,46 @@ describe('audio WS message dispatch', () => {
     ).not.toThrow();
   });
 
-  it('onerror alone leaves the decision to onclose; the close names the error', async () => {
+  it('a socket that fails names the error in the dropped call', async () => {
     const sock = await openCall();
-    sock.emitError({} as unknown as Event);
-    expect(useVoiceStore.getState().callError).toBeNull();
-    sock.emitClose(1006);
-  });
-
-  it('onclose stops the mic + TTS sink', async () => {
-    const sock = await openCall();
-    stopMicCaptureMock.mockClear();
-    stopTtsPlaybackMock.mockClear();
-    sock.emitClose();
-    await flush();
-    expect(stopMicCaptureMock).toHaveBeenCalled();
-    expect(stopTtsPlaybackMock).toHaveBeenCalled();
-  });
-
-  it('a session_start send failure sets a call error', async () => {
-    const { startVoiceCall } = await import('../src/lib/voiceCall');
-    startVoiceCall('c1');
-    await flush();
-    const sock = FakeWebSocket.last();
-    sock.send.mockImplementationOnce(() => {
-      throw new Error('send failed');
-    });
-    sock.emitOpen();
-    await flush();
-    expect(useVoiceStore.getState().callError).toMatch(/audio session_start failed/);
-    // Mic capture never starts when session_start itself failed to send.
-    expect(startMicCaptureMock).not.toHaveBeenCalled();
+    sock.emitClose(1006, '', 'Connection reset');
+    expect(useVoiceStore.getState().callError).toMatch(
+      /Call dropped — audio connection error: Connection reset/,
+    );
   });
 });
 
 describe('endVoiceCall', () => {
-  it('sends session_end with the sessionId, closes the socket, stops mic/tts/audio-service, clears the store', async () => {
-    const { startVoiceCall, endVoiceCall, audioWs } = await import('../src/lib/voiceCall');
+  it('sends session_end with the sessionId, closes the session and the audio service, clears the store', async () => {
+    const { startVoiceCall, endVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
     sock.sent.length = 0;
 
     await endVoiceCall();
-    const end = JSON.parse(sock.sent[0] as string);
+    const end = JSON.parse(sock.sent[0]!);
     expect(end).toMatchObject({ type: 'audio.session_end', sessionId: 'sess-1' });
     expect(sock.close).toHaveBeenCalled();
-    expect(stopMicCaptureMock).toHaveBeenCalled();
-    expect(stopTtsPlaybackMock).toHaveBeenCalled();
     expect(stopVoiceAudioServiceMock).toHaveBeenCalled();
     expect(useVoiceStore.getState().activeSession).toBeNull();
-    expect(audioWs()).toBeNull();
   });
 
-  it('a send failure on session_end is swallowed — close() below is the source of truth', async () => {
+  it('a session that never opened is closed without a session_end', async () => {
     const { startVoiceCall, endVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
-    sock.emitOpen();
-    await flush();
-    sock.send.mockImplementationOnce(() => {
-      throw new Error('already closing');
-    });
+    const sock = FakeCallTransport.last();
     await expect(endVoiceCall()).resolves.toBeUndefined();
+    expect(sock.sent).toHaveLength(0);
     expect(sock.close).toHaveBeenCalled();
   });
 
   it('with no active session at all, endVoiceCall is a harmless no-op', async () => {
-    const { endVoiceCall, audioWs } = await import('../src/lib/voiceCall');
+    const { endVoiceCall } = await import('../src/lib/voiceCall');
     await expect(endVoiceCall()).resolves.toBeUndefined();
-    expect(audioWs()).toBeNull();
   });
 });
 
@@ -743,9 +596,9 @@ describe('session modes + the notification as a control surface', () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    FakeWebSocket.last().emitOpen();
+    FakeCallTransport.last().emitOpen();
     await flush();
-    const start = JSON.parse(FakeWebSocket.last().sent[0] as string);
+    const start = JSON.parse(FakeCallTransport.last().sent[0] as string);
     expect(start.mode).toBe('call');
     expect(useVoiceStore.getState().callMode).toBe('call');
   });
@@ -759,22 +612,22 @@ describe('session modes + the notification as a control surface', () => {
       muted: false,
       transientFocus: false,
     });
-    FakeWebSocket.last().emitOpen();
+    FakeCallTransport.last().emitOpen();
     await flush();
-    expect(JSON.parse(FakeWebSocket.last().sent[0] as string).mode).toBe('hands-free');
+    expect(JSON.parse(FakeCallTransport.last().sent[0] as string).mode).toBe('hands-free');
   });
 
   it('switching mode reaches the open session and re-renders the notification', async () => {
     const { startVoiceCall, setCallMode } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
     sock.sent.length = 0;
     setCallMode('hands-free');
     expect(useVoiceStore.getState().callMode).toBe('hands-free');
-    expect(JSON.parse(sock.sent[0] as string)).toMatchObject({
+    expect(JSON.parse(sock.sent[0]!)).toMatchObject({
       type: 'audio.mode',
       mode: 'hands-free',
     });
@@ -794,7 +647,7 @@ describe('session modes + the notification as a control surface', () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1', 'hands-free');
     await flush();
-    const sock = FakeWebSocket.last();
+    const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
     sock.emitMessage(
@@ -815,7 +668,7 @@ describe('session modes + the notification as a control surface', () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
-    FakeWebSocket.last().emitOpen();
+    FakeCallTransport.last().emitOpen();
     await flush();
     expect(serviceActionHandler).toBeDefined();
 

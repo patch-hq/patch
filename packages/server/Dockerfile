@@ -21,6 +21,7 @@ RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 
 # Copy lockfile + workspace manifests first for layer caching.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json tsconfig.json ./
+COPY patches ./patches
 COPY packages/wire/package.json packages/wire/
 COPY packages/auth/package.json packages/auth/
 COPY packages/relay/package.json packages/relay/

@@ -577,7 +577,9 @@ export function createMainWindow(): BrowserWindow {
       // backoff (api/ws.ts) that drives liveUpdate.ts's auto-reload after a
       // deploy, so a hidden main window could sit on a stale bundle
       // indefinitely and need a manual Cmd+R. Off, so a deploy reloads this
-      // window whether or not it's the one currently in front.
+      // window whether or not it's the one currently in front — and so a call
+      // keeps its audio flowing with the window hidden or minimised (spec/07
+      // § A call keeps going in the background).
       backgroundThrottling: false,
     },
   });
