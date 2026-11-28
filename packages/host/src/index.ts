@@ -6220,11 +6220,17 @@ async function startHost(
   }
 
   function announceChat(state: ReturnType<typeof daemon.list>[number]): void {
+    const parentName =
+      state.spawnedByChatId !== undefined
+        ? daemon.chatState.get(state.spawnedByChatId)?.name
+        : undefined;
     forward({
       type: 'chat.spawned',
       chatId: state.chatId,
       hostId: selfHostId,
       folder: state.folder,
+      ...(state.spawnedByChatId !== undefined ? { parentChatId: state.spawnedByChatId } : {}),
+      ...(parentName ? { parentChatName: parentName } : {}),
     });
     // The full frame, not a hand-picked subset: the server's registry is rebuilt
     // from this replay, and a field left out (model, context, background tasks)

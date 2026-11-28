@@ -808,6 +808,8 @@ export const ChatSpawnedEvent = z
     ...hostIdField,
     folder: z.string().min(1),
     parentChatId: z.string().min(1).optional(),
+    /** The parent chat's name when the host knows it, so a surface that has not loaded the parent can still name it. */
+    parentChatName: z.string().optional(),
     /** Position in the account feed; set by the server on what it sends surfaces. */
     feedPos: z.number().int().nonnegative().optional(),
     ...forSurfaceIdField,

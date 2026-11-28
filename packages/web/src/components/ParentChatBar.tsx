@@ -18,13 +18,15 @@ const dismissed = new Set<string>();
 export function ParentChatBar({
   chatId,
   parentChatId,
+  spawnedName,
 }: {
   chatId: string;
   parentChatId: string;
+  spawnedName?: string;
 }): JSX.Element | null {
   const navigate = useNavigate();
   const [hidden, setHidden] = useState(dismissed.has(chatId));
-  const parentName = useChatStore((s) => s.chats[parentChatId]?.name ?? null);
+  const parentName = useChatStore((s) => s.chats[parentChatId]?.name ?? spawnedName ?? null);
   if (hidden) return null;
   return (
     <div className="archived-banner" data-testid="parent-chat-bar" role="status">

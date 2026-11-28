@@ -154,6 +154,8 @@ export interface ChatRow {
    * for a chat a person or a job started. Drives the "Started by" bar.
    */
   parentChatId?: string;
+  /** The parent's name as the host knew it at spawn; used when the parent is not in the local store. */
+  parentChatName?: string;
   /**
    * The chat's one-line status summary and what it is to the user (spec/06 §
    * The watch loop), mirrored from `chat.state` and the roster exactly as web
