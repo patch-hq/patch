@@ -80,6 +80,8 @@ export interface ChatSummary {
    */
   lastMessagePreview?: string | null;
   lastSeq?: number;
+  /** The seq of the latest agent message; the unread dot reads this, not `lastSeq`. */
+  lastMessageSeq?: number;
   /**
    * The chat's goal (patch/todo.md — `/goal`), mirrored from the host's
    * `chat.state`. `null` when unset. Lets REST surfaces show the goal at the top
@@ -722,6 +724,9 @@ export class ChatRegistry {
             ? event.lastMessagePreview
             : (existing?.lastMessagePreview ?? null),
         lastSeq: Math.max(existing?.lastSeq ?? 0, event.lastSeq ?? 0),
+        ...(Math.max(existing?.lastMessageSeq ?? -1, event.lastMessageSeq ?? -1) >= 0
+          ? { lastMessageSeq: Math.max(existing?.lastMessageSeq ?? -1, event.lastMessageSeq ?? -1) }
+          : {}),
         // Goal CAN be cleared (set to null), so `null` is a meaningful value —
         // only fall back to the existing goal when the field is absent (undefined).
         goal: event.goal !== undefined ? event.goal : (existing?.goal ?? null),
@@ -1109,6 +1114,7 @@ export class ChatRegistry {
         ? { lastMessagePreview: next.lastMessagePreview }
         : {}),
       ...((next.lastSeq ?? 0) > 0 ? { lastSeq: next.lastSeq } : {}),
+      ...(next.lastMessageSeq !== undefined ? { lastMessageSeq: next.lastMessageSeq } : {}),
       // `folder` on the wire is min(1); a spawned chat always has one, but guard
       // against an empty mirror value so `decode()` never rejects the frame.
       ...(next.folder ? { folder: next.folder } : {}),

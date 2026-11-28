@@ -145,6 +145,8 @@ interface ChatLogState {
    * was said last without reading the log.
    */
   lastMessage: string | null;
+  /** The seq of that message, or -1 when there is none. */
+  lastMessageSeq: number;
   /** Whether the file has its `log.start` record. */
   started: boolean;
   legacyUpTo: number | undefined;
@@ -220,6 +222,7 @@ export class ChatLog {
         const scan = this.scanTail(chatId, state);
         state.recordedHw = scan.hw;
         state.lastMessage = scan.lastMessage;
+        state.lastMessageSeq = scan.lastMessageSeq;
         state.nextSeq = Math.max(state.nextSeq, scan.hw + 1);
         openTurn = scan.openTurn;
         lastTurnOutcome = scan.lastTurnOutcome;
@@ -267,6 +270,7 @@ export class ChatLog {
       nextSeq: floor,
       recordedHw: -1,
       lastMessage: null,
+      lastMessageSeq: -1,
       started: false,
       legacyUpTo: undefined,
       dirty: false,
@@ -367,9 +371,12 @@ export class ChatLog {
     lastTurnLocalId: string | undefined;
     /** Head of the latest user/assistant message, or null. */
     lastMessage: string | null;
+    /** The seq of that message, or -1. */
+    lastMessageSeq: number;
   } {
     let hw = -1;
     let lastMessage: string | null = null;
+    let lastMessageSeq = -1;
     let hwSettled = false;
     let openTurn: { turnId: string; branchId: string } | null = null;
     let lastTurnOutcome: TurnOutcome | null = null;
@@ -377,7 +384,10 @@ export class ChatLog {
     let turnBoundarySettled = false;
     let turnStartFound = false;
     this.walkBackwards(chatId, state, (rec) => {
-      if (lastMessage === null) lastMessage = messageHead(rec);
+      if (lastMessage === null) {
+        lastMessage = messageHead(rec);
+        if (lastMessage !== null) lastMessageSeq = rec.seq;
+      }
       if (!hwSettled) {
         hw = Math.max(hw, rec.seq);
         if (rec.rec.k !== 'event') hwSettled = true;
@@ -407,7 +417,7 @@ export class ChatLog {
       }
       return !(hwSettled && turnStartFound && lastMessage !== null);
     });
-    return { hw, openTurn, lastTurnOutcome, lastTurnLocalId, lastMessage };
+    return { hw, openTurn, lastTurnOutcome, lastTurnLocalId, lastMessage, lastMessageSeq };
   }
 
   private walkBackwards(
@@ -497,6 +507,11 @@ export class ChatLog {
   /** Head of the chat's latest user/assistant message, or null when it has none. */
   lastMessage(chatId: string): string | null {
     return this.stateOf(chatId).lastMessage;
+  }
+
+  /** The seq of the chat's latest agent message, or -1 when it has none. */
+  lastMessageSeq(chatId: string): number {
+    return this.stateOf(chatId).lastMessageSeq;
   }
 
   /** The highest seq any record of the chat carries, or -1 when it has none. */
@@ -650,7 +665,10 @@ export class ChatLog {
       state.lastBranchId = record.branchId;
       state.recordedHw = Math.max(state.recordedHw, record.seq);
       const said = messageHead(record);
-      if (said !== null) state.lastMessage = said;
+      if (said !== null) {
+        state.lastMessage = said;
+        state.lastMessageSeq = record.seq;
+      }
       if (state.index) {
         if (state.records % INDEX_STRIDE === 0) {
           state.index.push({ offset, hwBefore: state.indexHw });

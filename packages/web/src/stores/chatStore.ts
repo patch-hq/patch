@@ -1872,6 +1872,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const state = event.chatStatus?.state ?? row.chatStatus?.state;
           chats[event.chatId] = {
             ...row,
+            ...(event.lastMessageSeq !== undefined
+              ? { lastMessageSeq: Math.max(row.lastMessageSeq ?? -1, event.lastMessageSeq) }
+              : {}),
             awaitingState: false,
             // The server says the turn is over, so no tool call is in flight; a
             // result that never arrived would otherwise keep a call spinning.
@@ -2150,7 +2153,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           break;
         }
         case 'chat.message': {
-          const row = ensureRow(event.chatId);
+          const heldRow = ensureRow(event.chatId);
+          // Only a real agent message makes a chat unread: not your own message,
+          // a system line (call summary, mode change), a note or a failure card.
+          const row =
+            event.role === 'assistant' && !event.error && event.content.trim() !== ''
+              ? { ...heldRow, lastMessageSeq: Math.max(heldRow.lastMessageSeq ?? -1, event.seq) }
+              : heldRow;
           // A failure the host raised (a failed turn, a damaged transcript) is
           // an error card, never a plain paragraph that reads as the model
           // talking. (seq, kind) is its identity so a repeated replay draws it once.
@@ -3389,7 +3398,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   markUnread(chatId) {
     const row = get().chats[chatId];
     if (!row || row.lastSeq < 0) return;
-    const nextRead = row.lastSeq - 1;
+    const nextRead = (row.lastMessageSeq ?? row.lastSeq) - 1;
     if (row.lastReadSeq === nextRead) return;
     set({ chats: { ...get().chats, [chatId]: { ...row, lastReadSeq: nextRead } } });
     resetReadWatermark(chatId, nextRead);

@@ -72,6 +72,12 @@ export interface ChatRow {
    */
   lastReadSeq: number;
   /**
+   * The seq of the chat's latest agent message. The unread badge reads this
+   * rather than `lastSeq`, which moves for every record (notes, tool rows, call
+   * summaries). Absent from an older host, which then keeps the `lastSeq` rule.
+   */
+  lastMessageSeq?: number;
+  /**
    * Durable first-user-message snippet — the sidebar one-line label for a row
    * (used for archived rows, which carry no live timeline). Captured ONCE from
    * the first user message and never overwritten by later turns, so the label
@@ -392,7 +398,7 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   if (server === 'interrupted') return 'interrupted';
   if (server === 'waiting_for_sign_in') return 'signin';
   if (server === 'running') return 'working';
-  if (row.lastSeq > row.lastReadSeq) return 'done';
+  if ((row.lastMessageSeq ?? row.lastSeq) > row.lastReadSeq) return 'done';
   if (server === 'paused') return 'paused';
   if (server === 'host_offline' || server === 'host_restarting' || server === 'queued_offline') {
     return 'away';

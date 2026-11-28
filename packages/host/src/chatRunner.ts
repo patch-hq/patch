@@ -17058,6 +17058,11 @@ export class Daemon {
       // What was said last (not the first prompt, which is `preview`), so a
       // surface not subscribed to the chat can show it and mark it unread.
       lastMessagePreview: this.lastMessagePreview(chatId),
+      // The seq of that message: the unread dot counts agent messages only, not
+      // every record the log gains (notes, call summaries, tool rows).
+      ...(this.chatLog.lastMessageSeq(chatId) >= 0
+        ? { lastMessageSeq: this.chatLog.lastMessageSeq(chatId) }
+        : {}),
       // The server decides the chat's status from the turn and question facts
       // this host reports (spec/12 § Chat status). `activity` and `lastError`
       // are only for a server too old to (no `serverStatus` in its auth.ok):
