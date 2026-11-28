@@ -1,16 +1,16 @@
-// audio/server.ts voice-config wiring tests (group: voice config matrix).
-// Confirms the surface-derivation + per-surface {backend, layer} branching —
+// audio/server.ts voice-config wiring tests. Confirms which engine each
+// surface runs on — a call and hands-free always on the voice agent, a voice
+// device on the voice agent unless it answers directly —
 // a real end-to-end WSS session against a fully mocked Gemini socket (via the
 // `geminiWsCtor` test hook), not just gemini-live.ts's own unit tests.
 //
-//   - call surface, backend='gemini'          -> GeminiLiveSession (dials "Gemini")
-//   - device surface, backend='gemini'        -> GeminiLiveSession too (a device is a surface like any other)
+//   - call, voice agent on Gemini               -> GeminiLiveSession (dials "Gemini")
+//   - device answering with the voice agent      -> GeminiLiveSession too (a device is a surface like any other)
 //   - dictation: the phone and the computer each run their own engine; Deepgram with no key -> voice_key_missing
-//   - call surface, backend='gemini', no key  -> audio.error{voice_key_missing}
-//   - call surface, backend='openai', no key  -> audio.error{openai_unavailable}
-//   (the working hosted cells are covered in audio-server-hosted-backends.test.ts)
-//   - call surface, backend='local', layer='light' -> voice_config_not_implemented (no front model yet)
-//   - default voiceConfig (local/direct everywhere) -> never dials Gemini
+//   - call, voice agent on Gemini, no key        -> audio.error{voice_key_missing}
+//   - call, voice agent on OpenAI, no key        -> audio.error{voice_key_missing}
+//   (each provider's working session is covered in audio-server-hosted-backends.test.ts)
+//   - a call is never answered on host speech: with no key it is refused
 
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
@@ -28,7 +28,9 @@ import {
   encodeAudio,
   decodeAudio,
   DEFAULT_VOICE_CONFIG,
+  DEFAULT_VOICE_AGENT,
   type AudioEvent,
+  type VoiceAgentProvider,
   type VoiceConfig,
 } from '@patch/wire/audio';
 
@@ -119,6 +121,7 @@ describe('audio server — voice config matrix selection', () => {
 
   async function startServer(opts: {
     voiceConfig?: Partial<VoiceConfig>;
+    provider?: VoiceAgentProvider;
     geminiApiKey?: string;
     deepgramApiKey?: string;
     deepgramWsUrl?: string;
@@ -141,6 +144,7 @@ describe('audio server — voice config matrix selection', () => {
       submitUserTurn: async () => 'mock reply',
       chatExists: () => true,
       getVoiceConfig: () => voiceConfig,
+      getVoiceAgent: () => ({ ...DEFAULT_VOICE_AGENT, provider: opts.provider ?? 'gemini' }),
       ...(opts.geminiApiKey !== undefined ? { geminiApiKey: opts.geminiApiKey } : {}),
       geminiWsCtor: makeGeminiWsCtor(),
       ...(opts.deepgramApiKey !== undefined ? { deepgramApiKey: opts.deepgramApiKey } : {}),
@@ -150,11 +154,8 @@ describe('audio server — voice config matrix selection', () => {
     return Object.assign(handle, { port: addr.port });
   }
 
-  test("call surface, backend='gemini' dials the (fake) Gemini socket", async () => {
-    server = await startServer({
-      voiceConfig: { call: { backend: 'gemini', layer: 'light' } },
-      geminiApiKey: 'test-key',
-    });
+  test('a call on the Gemini voice agent dials the (fake) Gemini socket', async () => {
+    server = await startServer({ provider: 'gemini', geminiApiKey: 'test-key' });
     const ws = await openSocket(server.port, 's-native-1');
     ws.send(
       encodeAudio({
@@ -182,9 +183,9 @@ describe('audio server — voice config matrix selection', () => {
     ws.close();
   });
 
-  test("device surface, backend='gemini' dials Gemini Live like any other surface", async () => {
+  test('a device answering with the voice agent dials Gemini Live like any other surface', async () => {
     server = await startServer({
-      voiceConfig: { device: { backend: 'gemini', layer: 'light' } },
+      voiceConfig: { deviceAnswer: 'agent' },
       geminiApiKey: 'test-key',
     });
     const ws = await openSocket(server.port, 's-device-1');
@@ -325,8 +326,8 @@ describe('audio server — voice config matrix selection', () => {
     ws.close();
   });
 
-  test("call surface, backend='gemini', no GEMINI_API_KEY refuses the session", async () => {
-    server = await startServer({ voiceConfig: { call: { backend: 'gemini', layer: 'light' } } });
+  test('a call on the Gemini voice agent with no GEMINI_API_KEY refuses the session', async () => {
+    server = await startServer({ provider: 'gemini' });
     const ws = await openSocket(server.port, 's-nokey-1');
     ws.send(
       encodeAudio({
@@ -358,8 +359,8 @@ describe('audio server — voice config matrix selection', () => {
     ws.close();
   });
 
-  test("call surface, backend='openai', no OPENAI_REALTIME_API_KEY refuses the session", async () => {
-    server = await startServer({ voiceConfig: { call: { backend: 'openai', layer: 'heavy' } } });
+  test('a call on the OpenAI voice agent with no OPENAI_REALTIME_API_KEY refuses the session', async () => {
+    server = await startServer({ provider: 'openai' });
     const ws = await openSocket(server.port, 's-openai-1');
     ws.send(
       encodeAudio({
@@ -391,38 +392,34 @@ describe('audio server — voice config matrix selection', () => {
     ws.close();
   });
 
-  test("a voice device on backend='local', layer='light' refuses — no front model built yet", async () => {
-    server = await startServer({
-      voiceConfig: { device: { backend: 'local', layer: 'light', handoff: 'auto' } },
-    });
-    const ws = await openSocket(server.port, 's-light-1');
+  test('a spoken alert (announcement) runs on host speech: no key needed, nothing dials', async () => {
+    server = await startServer({});
+    const ws = await openSocket(server.port, 's-alert-1');
     ws.send(
       encodeAudio({
         type: 'audio.session_start',
-        sessionId: 's-light-1',
+        sessionId: 's-alert-1',
         accountId: 'a',
         surfaceId: 'surf',
-        surfaceKind: 'device',
-        deviceId: 'kitchen',
+        surfaceKind: 'mobile',
         chatId: 'c1',
-        role: 'voice-device-conv',
+        role: 'announcement',
         token: mintToken({
           accountId: 'a',
           surfaceId: 'surf',
-          sessionId: 's-light-1',
+          sessionId: 's-alert-1',
           chatId: 'c1',
         }),
-        surfaceHasAec: false,
+        surfaceHasAec: true,
       }),
     );
     const msg = await recvOne(ws);
-    expect(msg.type).toBe('audio.error');
-    if (msg.type === 'audio.error') expect(msg.code).toBe('voice_config_not_implemented');
+    expect(msg.type).not.toBe('audio.error');
     expect(instances.length).toBe(0);
     ws.close();
   });
 
-  test('a plain web call is a Gemini voice agent call by default; with no key it is refused naming it', async () => {
+  test('a call is never answered on host speech: with no key it is refused, and nothing dials', async () => {
     server = await startServer({});
     const ws = await openSocket(server.port, 's-fb-1');
     ws.send(

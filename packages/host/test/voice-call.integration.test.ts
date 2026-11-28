@@ -144,7 +144,6 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
   const geminis: FakeGemini[] = [];
   const config: VoiceConfig = {
     ...DEFAULT_VOICE_CONFIG,
-    call: { backend: 'gemini', layer: 'light', handoff: 'auto' },
     ...voiceConfig,
   };
   const start = async (): Promise<void> => {

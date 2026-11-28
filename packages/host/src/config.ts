@@ -167,32 +167,20 @@ export interface HostConfig {
      * over it, and every consumer reads the store, not this field.
      */
     geminiApiKey: string | undefined;
-    /** Overrides `DEFAULT_GEMINI_LIVE_MODEL` (gemini-live.ts). GEMINI_LIVE_MODEL env. */
-    geminiLiveModel: string | undefined;
-    /** Overrides `DEFAULT_GEMINI_LIVE_HEAVY_MODEL` — the `layer: heavy` model. GEMINI_LIVE_MODEL_HEAVY env. */
-    geminiLiveModelHeavy: string | undefined;
     /**
      * OPENAI_REALTIME_API_KEY — the OpenAI key voice uses (Realtime sessions for
      * hands-free/call), required only
-     * when a `voiceConfig` surface selects `backend: 'openai'`. Deliberately NOT
+     * when the voice agent's provider is OpenAI. Deliberately NOT
      * `OPENAI_API_KEY`: that name is what the Codex agent backend and any tool a
      * chat runs would pick up and bill against, and this key is voice's alone.
      * The environment's value; a UI-set key wins (providerKeys.ts).
      */
     openaiApiKey: string | undefined;
-    /** Overrides `DEFAULT_OPENAI_REALTIME_MODELS.light`. OPENAI_REALTIME_MODEL_LIGHT env. */
-    openaiRealtimeModelLight: string | undefined;
-    /** Overrides `DEFAULT_OPENAI_REALTIME_MODELS.heavy`. OPENAI_REALTIME_MODEL_HEAVY env. */
-    openaiRealtimeModelHeavy: string | undefined;
     /**
      * ELEVEN_LABS_API_KEY — ElevenLabs Agents voice (`backend: 'elevenlabs'`).
      * The environment's value; a UI-set key wins (providerKeys.ts).
      */
     elevenLabsApiKey: string | undefined;
-    /** Overrides `DEFAULT_ELEVENLABS_AGENT_LLMS.light`. ELEVENLABS_AGENT_LLM_LIGHT env. */
-    elevenLabsAgentLlmLight: string | undefined;
-    /** Overrides `DEFAULT_ELEVENLABS_AGENT_LLMS.heavy`. ELEVENLABS_AGENT_LLM_HEAVY env. */
-    elevenLabsAgentLlmHeavy: string | undefined;
   };
 }
 
@@ -372,14 +360,8 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
           : undefined,
       maxConcurrentSessions,
       geminiApiKey: env['GEMINI_API_KEY'],
-      geminiLiveModel: env['GEMINI_LIVE_MODEL'],
-      geminiLiveModelHeavy: env['GEMINI_LIVE_MODEL_HEAVY'],
       openaiApiKey: env['OPENAI_REALTIME_API_KEY'],
-      openaiRealtimeModelLight: env['OPENAI_REALTIME_MODEL_LIGHT'],
-      openaiRealtimeModelHeavy: env['OPENAI_REALTIME_MODEL_HEAVY'],
       elevenLabsApiKey: env['ELEVEN_LABS_API_KEY'],
-      elevenLabsAgentLlmLight: env['ELEVENLABS_AGENT_LLM_LIGHT'],
-      elevenLabsAgentLlmHeavy: env['ELEVENLABS_AGENT_LLM_HEAVY'],
     },
   };
 }

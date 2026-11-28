@@ -6,8 +6,6 @@ import { EventEmitter } from 'node:events';
 import pino from 'pino';
 import {
   OpenAIRealtimeSession,
-  DEFAULT_OPENAI_REALTIME_MODELS,
-  openaiRealtimeModelFor,
   upsample16kTo24k,
   type OpenAIRealtimeDeps,
   type OpenAIWsCtor,
@@ -114,7 +112,7 @@ function audioDelta(samples: number): { type: string; delta: string } {
   return { type: 'response.output_audio.delta', delta: Buffer.from(pcm.buffer).toString('base64') };
 }
 
-describe('model per layer', () => {
+describe('the opening line', () => {
   test("a call answering an agent's ring opens with its reason: an item, then a response", async () => {
     const { deps, last } = makeDeps();
     const session = new OpenAIRealtimeSession(
@@ -136,14 +134,6 @@ describe('model per layer', () => {
     const ws = await open(session, last);
     expect(ws.ofType('response.create')).toHaveLength(0);
     await session.close();
-  });
-
-  test('light and direct run the mini model; heavy runs the flagship', () => {
-    expect(openaiRealtimeModelFor('light')).toBe(DEFAULT_OPENAI_REALTIME_MODELS.light);
-    expect(openaiRealtimeModelFor('direct')).toBe(DEFAULT_OPENAI_REALTIME_MODELS.light);
-    expect(openaiRealtimeModelFor('heavy')).toBe(DEFAULT_OPENAI_REALTIME_MODELS.heavy);
-    expect(openaiRealtimeModelFor('heavy', { heavy: 'x' })).toBe('x');
-    expect(openaiRealtimeModelFor('light', { light: 'y' })).toBe('y');
   });
 });
 

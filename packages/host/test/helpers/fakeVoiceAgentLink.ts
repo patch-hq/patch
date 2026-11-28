@@ -37,6 +37,10 @@ export function fakeVoiceAgentLink(
       calls.push(`lookBack:${query}`);
       return `found in ${chatId}: dentist on Tuesday`;
     }),
+    answerPermission: vi.fn((chatId: string, words: string) => {
+      calls.push(`permission:${chatId}:${words}`);
+      return false;
+    }),
     endCall: vi.fn((sessionId: string) => {
       calls.push(`end:${sessionId}`);
     }),

@@ -1853,6 +1853,7 @@ export class WsHub {
       // a UI sender and a host handler; three of those four are no use.
       case 'host.backend_add_account':
       case 'host.backend_usage_refresh':
+      case 'host.voice_catalog_refresh':
       case 'host.claude_settings_set':
       case 'host.claude_memory_delete':
       case 'host.claude_memory_set': {

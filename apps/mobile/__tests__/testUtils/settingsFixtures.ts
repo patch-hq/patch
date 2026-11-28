@@ -76,6 +76,7 @@ export function reportHost(
   s.setHostOnline(hostId, online);
   s.setHostReport({
     type: 'host.host',
+    voiceCatalog: {},
     hostId,
     hostName: hostId,
     platform: 'darwin',

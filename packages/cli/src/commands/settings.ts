@@ -290,8 +290,6 @@ const SETTING_KEYS: Record<string, string> = {
   'tts-backend': 'ttsBackend',
   'elevenlabs-voice': 'elevenLabsVoice',
   'elevenlabs-model': 'elevenLabsModel',
-  'gemini-voice': 'geminiVoice',
-  'openai-voice': 'openaiVoice',
   'dictation-pause': 'dictationPauseSeconds',
   'turn-detection': 'dictationTurnDetection',
   memory: 'harnessMemoryEnabled',

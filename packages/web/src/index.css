@@ -10134,6 +10134,11 @@ button.view-file-download {
   min-height: 52px;
   padding: 13px 16px;
 }
+/* A sub-heading inside a card ("How it sounds"). */
+.set-row.set-row-heading {
+  min-height: 0;
+  padding: 12px 16px 4px;
+}
 .set-row.stack {
   flex-direction: column;
   align-items: stretch;
@@ -10254,6 +10259,20 @@ button.set-row-open:focus-visible {
 }
 .set-slider input[type='range'] {
   width: 160px;
+  accent-color: var(--accent);
+}
+/* A tone: a full-width two-line box under its label (Settings → Voice calls). */
+.set-row.set-row-tone > .set-row-ctrl {
+  width: 100%;
+  margin-left: 0;
+}
+.set-row-ctrl textarea.set-tone {
+  width: 100%;
+  min-height: 0;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  resize: vertical;
 }
 .set-chev {
   color: var(--ink-faint);

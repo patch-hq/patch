@@ -6,8 +6,7 @@ import {
   decodeAudio,
   encodeAudio,
   validateDeviceIdCoupling,
-  voiceCellFor,
-  modesShareVoiceEngine,
+  DEFAULT_VOICE_AGENT,
   voiceKeyMissingMessage,
   voiceSurfacesMissingKey,
   voiceKeyHostStatus,
@@ -281,49 +280,6 @@ describe('chat.input.source — voice-app discriminator (group 13)', () => {
   });
 });
 
-describe('voiceCellFor / modesShareVoiceEngine (spec/07 § Voice — a config matrix)', () => {
-  const config = {
-    ...DEFAULT_VOICE_CONFIG,
-    call: { backend: 'gemini' as const, layer: 'light' as const, handoff: 'auto' as const },
-    handsFree: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
-  };
-  test('each surface reads its own cell', () => {
-    expect(voiceCellFor(config, 'call')).toEqual({
-      backend: 'gemini',
-      layer: 'light',
-      handoff: 'auto',
-    });
-    expect(voiceCellFor(config, 'hands-free')).toEqual({
-      backend: 'local',
-      layer: 'direct',
-      handoff: 'auto',
-    });
-    expect(voiceCellFor(config, 'device')).toEqual({
-      backend: 'local',
-      layer: 'direct',
-      handoff: 'auto',
-    });
-  });
-  test('modes on different engines cannot switch in place', () => {
-    expect(modesShareVoiceEngine(config, 'call', 'hands-free')).toBe(false);
-    expect(modesShareVoiceEngine(config, 'call', 'call')).toBe(true);
-  });
-  test('a different layer on the same backend is a different engine', () => {
-    const c = {
-      ...config,
-      handsFree: { backend: 'gemini' as const, layer: 'heavy' as const, handoff: 'auto' as const },
-    };
-    expect(modesShareVoiceEngine(c, 'hands-free', 'call')).toBe(false);
-    expect(modesShareVoiceEngine({ ...c, handsFree: config.call }, 'hands-free', 'call')).toBe(
-      true,
-    );
-  });
-  test('a different hand-off mode on the same engine cannot switch in place', () => {
-    const c = { ...config, handsFree: { ...config.call, handoff: 'always' as const } };
-    expect(modesShareVoiceEngine(c, 'hands-free', 'call')).toBe(false);
-  });
-});
-
 describe('speech to text setting', () => {
   test('defaults to Groq Whisper, and an older saved voice config reads as Groq', () => {
     expect(DEFAULT_VOICE_CONFIG.speechToText).toBe('groq');
@@ -342,9 +298,7 @@ describe('a voice surface whose backend has no key on the host', () => {
   const config = {
     dictation: { phone: 'deepgram' as const, computer: 'whisper' as const, tidy: false },
     meeting: 'local' as const,
-    device: { backend: 'openai' as const, layer: 'light' as const, handoff: 'auto' as const },
-    handsFree: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
-    call: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
+    deviceAnswer: 'agent',
   };
   test('the refusal names the surface, the key and the Settings → Voice fix', () => {
     expect(voiceKeyMissingMessage('dictation', 'gemini')).toBe(
@@ -357,23 +311,25 @@ describe('a voice surface whose backend has no key on the host', () => {
     );
   });
   test('lists every surface on a provider the host has no key for, and only those', () => {
-    expect(voiceSurfacesMissingKey(config, { gemini: false, openai: false })).toEqual([
+    // The device answers on the voice agent, here on OpenAI; calls and hands-free do too.
+    const agent = { ...DEFAULT_VOICE_AGENT, provider: 'openai' as const };
+    const openai = { backend: 'openai', env: 'OPENAI_REALTIME_API_KEY' };
+    expect(voiceSurfacesMissingKey(config, agent, { gemini: false, openai: false })).toEqual([
       { surface: 'dictation', backend: 'deepgram', env: 'DEEPGRAM_API_KEY' },
-      { surface: 'device', backend: 'openai', env: 'OPENAI_REALTIME_API_KEY' },
+      { surface: 'device', ...openai },
+      { surface: 'hands-free', ...openai },
+      { surface: 'call', ...openai },
     ]);
     expect(
-      voiceSurfacesMissingKey(config, { gemini: false, openai: false, deepgram: true }),
-    ).toEqual([{ surface: 'device', backend: 'openai', env: 'OPENAI_REALTIME_API_KEY' }]);
-    // A call and hands-free default to the Gemini voice agent; only the device is on host speech.
-    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, { gemini: true, openai: false })).toEqual(
-      [],
-    );
-    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, { gemini: false, openai: false })).toEqual(
-      [
-        { surface: 'hands-free', backend: 'gemini', env: 'GEMINI_API_KEY' },
-        { surface: 'call', backend: 'gemini', env: 'GEMINI_API_KEY' },
-      ],
-    );
+      voiceSurfacesMissingKey(config, agent, { gemini: false, openai: true, deepgram: true }),
+    ).toEqual([]);
+    // A device answering directly needs no provider key; the agent's does.
+    expect(
+      voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, DEFAULT_VOICE_AGENT, {
+        gemini: true,
+        openai: false,
+      }),
+    ).toEqual([]);
   });
   test('Settings names each host that cannot run a hosted cell; unreported hosts say nothing', () => {
     const hosts = [
@@ -464,14 +420,20 @@ describe('meeting engine', () => {
       await import('../src/audio.js');
     expect(DEFAULT_VOICE_CONFIG.meeting).toBe('local');
     expect(MeetingEngine.options).toEqual(['local', 'elevenlabs', 'deepgram', 'assemblyai']);
+    const { DEFAULT_VOICE_AGENT } = await import('../src/audio.js');
     const keys = { gemini: true, openai: false };
-    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, keys)).toEqual([]);
+    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, DEFAULT_VOICE_AGENT, keys)).toEqual([]);
     expect(
-      voiceSurfacesMissingKey({ ...DEFAULT_VOICE_CONFIG, meeting: 'assemblyai' }, keys),
+      voiceSurfacesMissingKey(
+        { ...DEFAULT_VOICE_CONFIG, meeting: 'assemblyai' },
+        DEFAULT_VOICE_AGENT,
+        keys,
+      ),
     ).toEqual([{ surface: 'meeting', backend: 'assemblyai', env: 'ASSEMBLYAI_API_KEY' }]);
     expect(
       voiceSurfacesMissingKey(
         { ...DEFAULT_VOICE_CONFIG, meeting: 'assemblyai' },
+        DEFAULT_VOICE_AGENT,
         { ...keys, assemblyai: true },
       ),
     ).toEqual([]);

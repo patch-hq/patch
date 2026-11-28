@@ -1,46 +1,22 @@
-// Settings → Voice: talking with Patch. One set of settings for every voice
-// conversation — calls, hands-free and voice devices alike: the provider, its
-// model and voice, whether it can pass work to the chat's agent, and what calls
-// have used. Plus the voice devices paired to the account. Dictation and
-// Meetings have their own pages.
+// Settings → Voice calls (spec/14 § Voice): the voice agent every call runs
+// on, whether agents can call you, the call settings, what calls have used,
+// and the voice devices paired to the account. Dictation and Meetings have
+// their own pages.
 
 import type { JSX } from 'react';
 import { useState } from 'react';
-import {
-  GEMINI_VOICES,
-  OPENAI_VOICES,
-  VoiceAgentBackend,
-  voiceKeyHostStatus,
-  type VoiceAgentCellConfig,
-} from '@patch/wire/audio';
-import { type VoiceLayer, type VoiceSurfaceConfig } from '../../api/rest.js';
+import { DeviceAnswer } from '@patch/wire/audio';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
-import { useUiStore } from '../../stores/uiStore.js';
 import { AddVoiceDevice } from '../../components/AddVoiceDevice.js';
 import { Toggle } from '../../components/Toggle.js';
 import { patchShared } from './sharedWrite.js';
 import { DeviceRow, useDevices } from './DevicesPage.js';
 import { VoiceProfilesGroup } from './VoiceProfilesGroup.js';
+import { VoiceAgentGroup } from './VoiceAgentGroup.js';
 import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
-import { failed } from '../../lib/errorCopy.js';
-import { DEFAULT_VOICE_DEVICE_PROMPT, DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { DEFAULT_VOICE_DEVICE_PROMPT, PAUSE_WHEN_QUIET_CHOICES } from '@patch/wire';
 import { PromptRow } from './PromptRow.js';
-
-const PROVIDERS = VoiceAgentBackend.options;
-const PROVIDER_LABELS: Record<VoiceAgentBackend, string> = {
-  gemini: 'Gemini',
-  openai: 'OpenAI',
-  elevenlabs: 'ElevenLabs',
-};
-type Variant = Exclude<VoiceLayer, 'direct'>;
-const VARIANTS: readonly Variant[] = ['light', 'heavy'];
-const VARIANT_NAMES: Record<VoiceAgentBackend, Record<Variant, string>> = {
-  gemini: { light: 'Flash 2.5 Native Audio', heavy: 'Gemini 3.8 Live Thinking' },
-  openai: { light: 'GPT Realtime 2.1 mini', heavy: 'GPT Realtime 2.1' },
-  elevenlabs: { light: 'Claude Haiku 4.5', heavy: 'Claude Sonnet 4.5' },
-};
-const variantOf = (layer: VoiceLayer): Variant => (layer === 'heavy' ? 'heavy' : 'light');
 
 const fmtInt = (n: number): string => Math.round(n).toLocaleString('en-GB');
 const calls = (n: number): string => `${n} ${n === 1 ? 'call' : 'calls'}`;
@@ -53,8 +29,9 @@ export function VoicePage(): JSX.Element {
       experimental
       testid="settings-voice"
     >
-      <ConversationGroup />
-      <VoiceInstructionsGroup />
+      <VoiceAgentGroup />
+      <AgentsCallingGroup />
+      <CallsGroup />
       <UsageGroup />
       <VoiceDevicesGroup />
       <VoiceProfilesGroup />
@@ -62,167 +39,67 @@ export function VoicePage(): JSX.Element {
   );
 }
 
-/**
- * The voice conversation config (spec/07 § Voice). One choice drives calls,
- * hands-free and voice devices: it is written to all three cells.
- */
-function ConversationGroup(): JSX.Element {
-  const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
+/** Agents calling you (spec/07 § Agent-initiated voice). */
+function AgentsCallingGroup(): JSX.Element {
+  const canCall = usePreferencesStore((s) => s.preferences.agentsCanCall);
+  const autoAnswer = usePreferencesStore((s) => s.preferences.agentCallAutoAnswer);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const update = usePreferencesStore((s) => s.update);
-  const pushError = useUiStore((s) => s.pushError);
-  const hosts = usePresenceStore((s) => s.hosts);
-  const hostReports = Object.values(hosts).flatMap((h) =>
-    h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
-  );
-  const cell = voiceConfig.call;
-  const { backend, layer, handoff } = cell;
-  // The voice agent setup drives calls and hands-free, and a voice device
-  // answered by the voice agent (spec/07 § The voice agent); a device answered
-  // directly keeps its own host-speech cell.
-  const write = (next: VoiceAgentCellConfig): void => {
-    const device = voiceConfig.device.backend === 'local' ? voiceConfig.device : next;
-    void update({ voiceConfig: { ...voiceConfig, call: next, handsFree: next, device } }).catch(
-      (e: Error) => pushError(failed('settings'), undefined, e.message),
-    );
-  };
-  const keyStatus = voiceKeyHostStatus(backend, hostReports);
   return (
-    <Group label="Engine" testid="settings-voice-config">
-      <Row
-        title="Provider"
-        sub={
-          keyStatus ? (
-            <span className="set-sub-line set-sub-error" data-testid="voice-keys">
-              {keyStatus}
-            </span>
-          ) : undefined
-        }
-        testid="voice-provider"
-        className="stack set-row-choices"
-      >
-        <Pills
-          label="Voice provider"
-          options={PROVIDERS}
-          labels={PROVIDER_LABELS}
-          value={backend}
+    <Group label="Agents calling you" testid="settings-agents-calling">
+      <Row title="Agents can call you" sub="Rings every device" testid="agents-can-call-row">
+        <Toggle
+          checked={canCall}
           disabled={!loaded}
-          testid="voice-engine"
-          onChange={(next) =>
-            write({
-              backend: next,
-              layer: variantOf(layer),
-              handoff: handoff === 'never' ? 'never' : 'auto',
-            })
-          }
+          testid="agents-can-call"
+          onChange={(on) => void patchShared('agents can call you', { agentsCanCall: on })}
         />
       </Row>
-      {
-        <>
-          <Row title="Model" testid="voice-model" className="stack set-row-choices">
-            <Pills
-              label="Voice model"
-              options={VARIANTS}
-              labels={VARIANT_NAMES[backend]}
-              value={variantOf(layer)}
-              disabled={!loaded}
-              testid="voice-variant"
-              onChange={(next) => write({ ...cell, layer: next })}
-            />
-          </Row>
-          <HostedVoiceRow backend={backend} />
-          <Row
-            title="Pass work to the chat’s agent"
-            sub={
-              handoff === 'never'
-                ? 'The voice answers everything itself.'
-                : 'The voice answers what it can and hands the rest to the agent.'
-            }
-            testid="voice-handoff-row"
-          >
-            <Toggle
-              checked={handoff !== 'never'}
-              disabled={!loaded}
-              onChange={(on) => write({ ...cell, handoff: on ? 'auto' : 'never' })}
-              testid="voice-handoff-toggle"
-            />
-          </Row>
-        </>
-      }
+      {canCall ? (
+        <Row
+          title="Answer automatically in hands-free"
+          sub="Pauses playback while the agent talks"
+          testid="agent-call-auto-answer-row"
+        >
+          <Toggle
+            checked={autoAnswer}
+            disabled={!loaded}
+            testid="agent-call-auto-answer"
+            onChange={(on) => void patchShared('answer automatically', { agentCallAutoAnswer: on })}
+          />
+        </Row>
+      ) : null}
     </Group>
   );
 }
 
-/** The voice a hosted provider speaks in. */
-function HostedVoiceRow({ backend }: { backend: VoiceAgentBackend }): JSX.Element {
-  if (backend === 'elevenlabs') return <ElevenLabsVoiceRow />;
-  return <PresetVoiceRow backend={backend} />;
-}
+type QuietOption = `${(typeof PAUSE_WHEN_QUIET_CHOICES)[number]}`;
+const QUIET_OPTIONS = PAUSE_WHEN_QUIET_CHOICES.map(String) as QuietOption[];
+const QUIET_LABELS = Object.fromEntries(
+  QUIET_OPTIONS.map((o) => [o, o === '0' ? 'Off' : `${o} min`]),
+) as Record<QuietOption, string>;
 
-function PresetVoiceRow({ backend }: { backend: 'gemini' | 'openai' }): JSX.Element {
-  const key = backend === 'gemini' ? 'geminiVoice' : 'openaiVoice';
-  const value = usePreferencesStore((s) => s.preferences[key]);
+/** Calls (spec/07 § Pause): pause a call nobody has spoken in for a while. */
+function CallsGroup(): JSX.Element {
+  const minutes = usePreferencesStore((s) => s.preferences.pauseWhenQuietMinutes);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const voices = backend === 'gemini' ? GEMINI_VOICES : OPENAI_VOICES;
   return (
-    <Row title="Voice" testid={`voice-${backend}-voice-row`}>
-      <select
-        aria-label="Voice"
-        data-testid={`voice-${backend}-voice`}
-        value={value ?? ''}
-        disabled={!loaded}
-        onChange={(e) => void patchShared('voice', { [key]: e.target.value })}
-      >
-        {value === undefined ? <option value="">Provider default</option> : null}
-        {voices.map((v) => (
-          <option key={v} value={v}>
-            {v}
-          </option>
-        ))}
-      </select>
-    </Row>
-  );
-}
-
-/** The account's ElevenLabs voices, listed by whichever online host holds the key. */
-function ElevenLabsVoiceRow(): JSX.Element {
-  const elevenLabsVoice = usePreferencesStore((s) => s.preferences.elevenLabsVoice);
-  const loaded = usePreferencesStore((s) => s.loaded);
-  const hosts = usePresenceStore((s) => s.hosts);
-  const reports = Object.values(hosts).flatMap((h) => (h.host ? [h.host] : []));
-  const voices = reports.find((h) => h.elevenLabsVoices !== undefined)?.elevenLabsVoices;
-  const error = reports.find((h) => h.elevenLabsVoicesError !== undefined)?.elevenLabsVoicesError;
-  return (
-    <Row
-      title="Voice"
-      sub={
-        error !== undefined
-          ? `Could not list ElevenLabs voices: ${error}`
-          : voices === undefined
-            ? 'Add an ElevenLabs key under Hosts → Keys to list voices'
-            : undefined
-      }
-      testid="voice-elevenlabs-voice-row"
-    >
-      <select
-        aria-label="Voice"
-        data-testid="elevenlabs-voice"
-        value={elevenLabsVoice ?? ''}
-        disabled={!loaded || voices === undefined}
-        onChange={(e) => void patchShared('voice', { elevenLabsVoice: e.target.value })}
-      >
-        {elevenLabsVoice === undefined ? <option value="">—</option> : null}
-        {(voices ?? []).map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.category === 'generated'
-              ? `${v.name} (designed)`
-              : v.category && v.category !== 'premade'
-                ? `${v.name} (${v.category})`
-                : v.name}
-          </option>
-        ))}
-      </select>
-    </Row>
+    <Group label="Calls" testid="settings-calls">
+      <Row title="Pause when quiet for" testid="pause-when-quiet-row">
+        <Pills
+          label="Pause when quiet for"
+          options={QUIET_OPTIONS}
+          labels={QUIET_LABELS}
+          value={String(minutes) as QuietOption}
+          disabled={!loaded}
+          testid="pause-when-quiet"
+          onChange={(next) =>
+            void patchShared('pause when quiet', {
+              pauseWhenQuietMinutes: Number(next) as (typeof PAUSE_WHEN_QUIET_CHOICES)[number],
+            })
+          }
+        />
+      </Row>
+    </Group>
   );
 }
 
@@ -253,12 +130,51 @@ const ELEVENLABS_MODELS = [
   { id: 'eleven_v3', label: 'v3 (most expressive)' },
 ] as const;
 
+/** The account's ElevenLabs voices for host speech, listed by whichever online host holds the key. */
+function ElevenLabsVoiceRow(): JSX.Element {
+  const elevenLabsVoice = usePreferencesStore((s) => s.preferences.elevenLabsVoice);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const reports = Object.values(hosts).flatMap((h) => (h.host ? [h.host] : []));
+  const voices = reports.find((h) => h.elevenLabsVoices !== undefined)?.elevenLabsVoices;
+  const error = reports.find((h) => h.elevenLabsVoicesError !== undefined)?.elevenLabsVoicesError;
+  return (
+    <Row
+      title="Voice"
+      sub={
+        error !== undefined
+          ? `Could not list ElevenLabs voices: ${error}`
+          : voices === undefined
+            ? 'Add an ElevenLabs key in Settings → Providers to list voices'
+            : undefined
+      }
+      testid="voice-elevenlabs-voice-row"
+    >
+      <select
+        aria-label="Voice"
+        data-testid="elevenlabs-voice"
+        value={elevenLabsVoice ?? ''}
+        disabled={!loaded || voices === undefined}
+        onChange={(e) => void patchShared('voice', { elevenLabsVoice: e.target.value })}
+      >
+        {elevenLabsVoice === undefined ? <option value="">—</option> : null}
+        {(voices ?? []).map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.name}
+          </option>
+        ))}
+      </select>
+    </Row>
+  );
+}
+
 /**
- * Local calls: your words are transcribed on the host, every turn goes to the
- * chat's agent, and its reply is read out by Kokoro or ElevenLabs. The same
- * speech reads out announcements on house speakers.
+ * A voice device answering directly (spec/16): its words are transcribed on
+ * the chat's host, every turn goes to the chat's agent, and the reply is read
+ * out on the host by Kokoro or ElevenLabs. The same speech reads out
+ * announcements on house speakers.
  */
-function LocalCallRows(): JSX.Element {
+function DeviceDirectRows(): JSX.Element {
   const kokoroVoice = usePreferencesStore((s) => s.preferences.kokoroVoice);
   const ttsBackend = usePreferencesStore((s) => s.preferences.ttsBackend) ?? 'kokoro';
   const elevenLabsModel = usePreferencesStore((s) => s.preferences.elevenLabsModel);
@@ -403,6 +319,7 @@ function VoiceDevicesGroup(): JSX.Element {
   );
   return (
     <Group label="Voice devices" testid="settings-voice-devices">
+      <DeviceAnswerRow />
       {voice === null ? (
         <Note>Loading…</Note>
       ) : voice.length === 0 ? (
@@ -422,63 +339,34 @@ function VoiceDevicesGroup(): JSX.Element {
           <AddVoiceDevice onClose={() => setPairing(false)} />
         </div>
       ) : null}
-      <DeviceAnswerRows />
       <SpeakingAloudPromptRow />
     </Group>
   );
 }
 
-/** What the voice agent is told it is (spec/07 § Voice instructions): the user's own text. */
-function VoiceInstructionsGroup(): JSX.Element {
-  const current = usePreferencesStore((s) => s.preferences.voiceInstructions);
-  return (
-    <Group label="Voice agent" testid="settings-voice-instructions">
-      <PromptRow
-        id="voice-instructions"
-        title="Voice instructions"
-        sub="What the voice agent on a call is told it is. Nothing else is added but its tone and the chat."
-        defaultText={DEFAULT_VOICE_INSTRUCTIONS}
-        current={current}
-        onSave={(text) => patchShared('voice instructions', { voiceInstructions: text })}
-        onDefault={() =>
-          patchShared('voice instructions', { voiceInstructions: DEFAULT_VOICE_INSTRUCTIONS })
-        }
-      />
-    </Group>
-  );
-}
-
 /**
- * How a voice device's conversation is answered (spec/16 § A conversation): by
- * the account's voice agent, or directly, with speech on the chat's host.
+ * How a voice device's conversation is answered (spec/16): by the account's
+ * voice agent, or directly, with speech on the chat's host.
  */
-function DeviceAnswerRows(): JSX.Element {
+function DeviceAnswerRow(): JSX.Element {
   const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const update = usePreferencesStore((s) => s.update);
-  const pushError = useUiStore((s) => s.pushError);
-  const direct = voiceConfig.device.backend === 'local';
-  const choose = (next: 'agent' | 'direct'): void => {
-    const device: VoiceSurfaceConfig =
-      next === 'direct' ? { backend: 'local', layer: 'direct', handoff: 'auto' } : voiceConfig.call;
-    void update({ voiceConfig: { ...voiceConfig, device } }).catch((e: Error) =>
-      pushError(failed('settings'), undefined, e.message),
-    );
-  };
   return (
     <>
-      <Row title="Answer with" testid="voice-device-answer" className="stack set-row-choices">
+      <Row title="Answers with" testid="voice-device-answer-row">
         <Pills
-          label="Voice device answers with"
-          options={['agent', 'direct'] as const}
+          label="Voice devices answer with"
+          options={DeviceAnswer.options}
           labels={{ agent: 'Voice agent', direct: 'Direct' }}
-          value={direct ? 'direct' : 'agent'}
+          value={voiceConfig.deviceAnswer}
           disabled={!loaded}
-          testid="voice-device-answer-pills"
-          onChange={choose}
+          testid="voice-device-answer"
+          onChange={(deviceAnswer) =>
+            void patchShared('voice devices', { voiceConfig: { ...voiceConfig, deviceAnswer } })
+          }
         />
       </Row>
-      {direct ? <LocalCallRows /> : null}
+      {voiceConfig.deviceAnswer === 'direct' ? <DeviceDirectRows /> : null}
     </>
   );
 }

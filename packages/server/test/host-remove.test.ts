@@ -85,6 +85,7 @@ describe('DELETE /api/hosts/:hostId', () => {
       // forget.
       daemon.send({
         type: 'host.host',
+        voiceCatalog: {},
         hostId: 'host-b',
         hostName: 'box-b',
         platform: 'linux',

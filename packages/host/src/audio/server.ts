@@ -22,20 +22,25 @@ import {
   validateDeviceIdCoupling,
   draftDictationHostId,
   deriveVoiceSurface,
-  voiceCellFor,
+  voiceBackendFor,
   dictationEngineFor,
   type DictationEngine,
-  modesShareVoiceEngine,
   voiceKeyMissingMessage,
   DEFAULT_VOICE_CONFIG,
   type AudioCallLogEvent,
+  DEFAULT_VOICE_AGENT,
+  VOICE_AGENT_ENGINES,
+  soundConfig,
+  toneFor,
+  type VoiceAgentSetting,
+  type VoiceCatalogEntry,
+  type VoiceTones,
   type AudioErrorCode,
+  type AudioSessionRole,
   type AudioSurfaceKind,
   type SpeechToTextEngine,
   type VoiceBackend,
   type VoiceConfig,
-  type VoiceHandoff,
-  type VoiceLayer,
 } from '@patch/wire/audio';
 import {
   StreamingUpsampler48k,
@@ -52,17 +57,13 @@ import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
 import type { WhisperBackend } from './whisper.js';
 import type { SpeechToTextResolution } from './stt-engines.js';
 import type { KokoroBackend } from './kokoro.js';
-import { GeminiLiveSession, geminiLiveModelFor } from './gemini-live.js';
+import { GeminiLiveSession } from './gemini-live.js';
 import type { VoiceAgentLink } from './voiceAgent.js';
+import { voiceAgentChoiceRefusal } from './voiceCatalog.js';
 import { isManagerCall, type ManagerVoiceTools } from './managerVoice.js';
-import {
-  OpenAIRealtimeSession,
-  openaiRealtimeModelFor,
-  type OpenAIWsCtor,
-} from './openai-realtime.js';
+import { OpenAIRealtimeSession, type OpenAIWsCtor } from './openai-realtime.js';
 import {
   ElevenLabsAgentSession,
-  elevenLabsAgentLlmFor,
   type ElevenLabsWsCtor,
   type ElevenLabsFetch,
 } from './elevenlabs-agent.js';
@@ -161,8 +162,18 @@ export interface AudioServerOptions {
    * `direct`).
    */
   getVoiceConfig?: () => VoiceConfig;
-  /** The voice each hosted provider speaks in (Settings → Voice), read per call. Absent entries use the provider's default. */
-  getHostedVoices?: () => { gemini?: string; openai?: string; elevenlabs?: string };
+  /**
+   * The account's voice agent setup (spec/07 § The voice agent), read per
+   * session like `getVoiceConfig`. Absent: `DEFAULT_VOICE_AGENT`.
+   */
+  getVoiceAgent?: () => VoiceAgentSetting;
+  /** Tone texts by voice (`voiceTones`), read per session. */
+  getVoiceTones?: () => VoiceTones;
+  /**
+   * This host's latest read of a provider's models and voices (voiceCatalog.ts).
+   * A stored choice the read no longer lists is refused at session start.
+   */
+  getVoiceCatalog?: (provider: VoiceAgentSetting['provider']) => VoiceCatalogEntry | undefined;
   /** Each device's own dictation engine, by surface id (`deviceDictation`), read per session. */
   getDeviceDictation?: () => Record<string, DictationEngine> | undefined;
   /**
@@ -181,10 +192,6 @@ export interface AudioServerOptions {
    * the next session without a restart.
    */
   geminiApiKey?: KeySource;
-  /** Overrides gemini-live.ts's `DEFAULT_GEMINI_LIVE_MODEL` (layer light/direct). */
-  geminiLiveModel?: string;
-  /** Overrides gemini-live.ts's `DEFAULT_GEMINI_LIVE_HEAVY_MODEL` (layer heavy). */
-  geminiLiveModelHeavy?: string;
   /**
    * OPENAI_REALTIME_API_KEY. Required to construct an `OpenAIRealtimeSession`
    * — absent on a surface configured for `backend: 'openai'` rejects the
@@ -210,18 +217,12 @@ export interface AudioServerOptions {
   /** Test seam: the WebSocket constructor and URL an ElevenLabs dictation dials. */
   elevenlabsWsCtor?: typeof import('ws').default;
   elevenlabsWsUrl?: string;
-  /** Per-layer overrides of openai-realtime.ts's `DEFAULT_OPENAI_REALTIME_MODELS`. */
-  openaiRealtimeModelLight?: string;
-  openaiRealtimeModelHeavy?: string;
   /**
    * ELEVEN_LABS_API_KEY. Required to construct an `ElevenLabsAgentSession` —
    * absent on a surface configured for `backend: 'elevenlabs'` rejects the
    * connection with `audio.error {code: 'voice_key_missing'}` (NO SILENT FALLBACK).
    */
   elevenLabsApiKey?: KeySource;
-  /** Per-layer overrides of elevenlabs-agent.ts's `DEFAULT_ELEVENLABS_AGENT_LLMS`. */
-  elevenLabsAgentLlmLight?: string;
-  elevenLabsAgentLlmHeavy?: string;
   /** Test seams: the WebSocket constructor, REST fetch and API base an ElevenLabs session uses. */
   elevenLabsWsCtor?: ElevenLabsWsCtor;
   elevenLabsFetch?: ElevenLabsFetch;
@@ -234,8 +235,6 @@ export interface AudioServerOptions {
   voiceAgentLink?: VoiceAgentLink;
   /** spec/07 § Voice instructions — the account's voice instructions, read at each call's start. */
   getVoiceInstructions?: () => string;
-  /** How the chosen voice sounds (its tone, as the user wrote it), read at each call's start. */
-  getVoiceTone?: (backend: 'gemini' | 'openai' | 'elevenlabs') => string | undefined;
   /**
    * spec/07 § A call to the Manager — the tools a hosted voice is given on a
    * call to the Manager chat, in place of handing off to the Manager's agent.
@@ -433,7 +432,7 @@ interface ActiveSession {
   surfaceId: string;
   accountId: string;
   surfaceKind: AudioSurfaceKind;
-  role: 'voice-note' | 'voice-call' | 'voice-device-conv';
+  role: AudioSessionRole;
   /** Set for `device` sessions only — drives the `onDeviceSession(_, false)` on close. */
   deviceId?: string;
   /** An app call's heartbeat (spec/07 § A dropped call comes back). */
@@ -809,9 +808,8 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ? { callReason: start.callReason }
             : {}),
         };
-        // spec/07 § Voice — a config matrix. Which surface this session
-        // belongs to, then that surface's own {backend, layer} choice, read
-        // live (same pattern as `getKokoroVoice`) so a settings change takes
+        // Which surface this session belongs to, then the backend it runs on
+        // (spec/07 § Two kinds of call), read live so a settings change takes
         // effect on the NEXT call with no restart.
         const voiceSurface = deriveVoiceSurface({
           role: start.role,
@@ -840,11 +838,18 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           opts.resolveSpeechToText
             ? opts.resolveSpeechToText(voiceConfig.speechToText)
             : { ok: true, whisper: opts.whisper };
-        const hostedVoices = opts.getHostedVoices?.() ?? {};
-        const cell: { backend: VoiceBackend; layer?: VoiceLayer; handoff?: VoiceHandoff } =
-          voiceSurface === 'dictation'
-            ? { backend: 'local' }
-            : voiceCellFor(voiceConfig, voiceSurface);
+        // spec/07 § The voice agent — one setup for every voice agent call.
+        const agent = opts.getVoiceAgent?.() ?? DEFAULT_VOICE_AGENT;
+        const tones = opts.getVoiceTones?.() ?? {};
+        // The chosen provider's model, voice, tone and sound, read the same way
+        // for every provider from its engine description; each session merges
+        // the sound config into its own provider config.
+        const setup = agent.setups[agent.provider];
+        const tone = toneFor(tones, agent.provider, setup.voice);
+        const backend: VoiceBackend =
+          voiceSurface === 'dictation' || voiceSurface === 'announcement'
+            ? 'local'
+            : voiceBackendFor(voiceConfig, agent, voiceSurface);
         // A hosted session whose provider side dies ends the surface session
         // too — the surface must stop streaming into a dead engine.
         const onFatal = (message: string): void => {
@@ -853,8 +858,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         const sessionLog = log.child({
           sessionId: start.sessionId,
           surface: voiceSurface,
-          backend: dictationEngine ?? cell.backend,
-          ...(cell.layer !== undefined ? { layer: cell.layer } : {}),
+          backend: dictationEngine ?? backend,
         });
         const sendAudioFn = (ev: AudioEvent): void => send(ws, ev);
         const sendBinaryFn = (pcm: Int16Array): void =>
@@ -867,18 +871,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           const pcm = deviceUpsampler ? deviceUpsampler.push(pcm24) : pcm24;
           if (pcm.length > 0) sendBinaryFn(pcm);
         };
-
-        if (cell.backend === 'local' && cell.layer !== undefined && cell.layer !== 'direct') {
-          // local + light/heavy: no front model exists for the local backend
-          // (Haiku was tried and rejected as not capable enough — spec/07
-          // § Light layer / heavy layer split). Only `direct` is built.
-          rejectConn(
-            ws,
-            'voice_config_not_implemented',
-            `${voiceSurface} local layer "${cell.layer}" has no front model yet; select "direct"`,
-          );
-          return;
-        }
 
         // The VAD comes from the voice component, which an installed host may
         // not have: built up front so a missing one refuses THIS session by
@@ -899,7 +891,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         // itself. Fixed for the session from the chat it opened on.
         const hosted =
           voiceSurface !== 'dictation' &&
-          (cell.backend === 'gemini' || cell.backend === 'openai' || cell.backend === 'elevenlabs');
+          (backend === 'gemini' || backend === 'openai' || backend === 'elevenlabs');
         const managerCall = hosted && isManagerCall(start.chatId);
         if (managerCall && !opts.managerVoice) {
           rejectConn(
@@ -911,38 +903,53 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         }
         const managerDeps = managerCall ? { manager: opts.managerVoice! } : {};
         // spec/07 § The voice agent and the chat's agent — what every voice agent call is
-        // given, whichever provider runs it.
-        const voiceAgentDeps = (
-          backend: 'gemini' | 'openai' | 'elevenlabs',
-        ): { link: VoiceAgentLink; instructions: string; tone?: string } => {
+        // given, whichever provider runs it: the chat link, the instructions and the
+        // voice's tone, then the chosen voice and its sound as that provider's config.
+        const voiceAgentDeps = (): {
+          link: VoiceAgentLink;
+          instructions: string;
+          tone?: string;
+          voice?: string;
+          soundConfig: Record<string, unknown>;
+        } => {
           if (!opts.voiceAgentLink || !opts.getVoiceInstructions) {
             throw new Error(
               'audio server: a voice agent call needs voiceAgentLink and getVoiceInstructions',
             );
           }
-          const tone = opts.getVoiceTone?.(backend);
           return {
             link: opts.voiceAgentLink,
             instructions: opts.getVoiceInstructions(),
-            ...(tone !== undefined && tone.trim() !== '' ? { tone } : {}),
+            ...(tone !== undefined ? { tone } : {}),
+            ...(setup.voice !== undefined ? { voice: setup.voice } : {}),
+            soundConfig: soundConfig(VOICE_AGENT_ENGINES[agent.provider], setup.sound, tone),
           };
+        };
+        // A stored model or voice the provider no longer lists is refused,
+        // naming it, never swapped (spec/07 § The voice agent). Checked once
+        // the key is known to be here, so a missing key is what is reported.
+        const refuseChoice = (): boolean => {
+          const refusal = voiceAgentChoiceRefusal(agent, opts.getVoiceCatalog?.(agent.provider));
+          if (refusal === null) return false;
+          rejectConn(ws, `${agent.provider}_unavailable`, refusal);
+          return true;
         };
 
         // spec/16 — a device's session is heard out loud in a room, by whoever is there.
         const device = voiceSurface === 'device' ? opts.deviceVoice?.() : undefined;
         if (
           device !== undefined &&
-          cell.backend !== 'openai' &&
+          backend !== 'openai' &&
           device.profiles().some((p) => p.voiceprint !== undefined)
         ) {
           // Only the OpenAI engine recognises speakers so far. Said, not hidden:
           // on this engine everyone in the room is answered alike.
           sessionLog.warn(
-            { sessionId: start.sessionId, backend: cell.backend },
+            { sessionId: start.sessionId, backend: backend },
             'voice profiles are not applied on this engine; switch the device to OpenAI to use them',
           );
         }
-        if (voiceSurface !== 'dictation' && cell.backend === 'gemini') {
+        if (voiceSurface !== 'dictation' && backend === 'gemini') {
           const geminiKey = readKey(opts.geminiApiKey);
           if (geminiKey === undefined) {
             // NO SILENT FALLBACK: this surface is configured for gemini and
@@ -951,6 +958,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage(voiceSurface, 'gemini'));
             return;
           }
+          if (refuseChoice()) return;
           if (!opts.makeTimeline) throw new Error('audio server: hosted voice needs makeTimeline');
           const geminiVad = buildVad();
           if (geminiVad === null) return;
@@ -959,70 +967,60 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             logger: sessionLog,
             sendAudio: sendAudioFn,
             sendBinary: hostedSendBinary,
-            ...voiceAgentDeps('gemini'),
+            ...voiceAgentDeps(),
             apiKey: geminiKey,
             gate: {
               makeVad: (): Vad => geminiVad,
               transcriber: opts.whisper,
             },
-            ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
-            ...(hostedVoices.gemini !== undefined ? { voice: hostedVoices.gemini } : {}),
-            model: geminiLiveModelFor(cell.layer ?? 'light', {
-              light: opts.geminiLiveModel,
-              heavy: opts.geminiLiveModelHeavy,
-            }),
+            // refuseChoice() has refused a session with no model.
+            model: setup.model!,
             onFatal,
             ...(device ? { spokenAloud: device.prompt() } : {}),
             ...managerDeps,
             ...(opts.geminiWsCtor ? { wsCtor: opts.geminiWsCtor } : {}),
             ...(opts.geminiWsUrl ? { wsUrl: opts.geminiWsUrl } : {}),
           });
-        } else if (voiceSurface !== 'dictation' && cell.backend === 'openai') {
+        } else if (voiceSurface !== 'dictation' && backend === 'openai') {
           const openaiKey = readKey(opts.openaiApiKey);
           if (openaiKey === undefined) {
             rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage(voiceSurface, 'openai'));
             return;
           }
+          if (refuseChoice()) return;
           if (!opts.makeTimeline) throw new Error('audio server: hosted voice needs makeTimeline');
           session = new OpenAIRealtimeSession(sessionInit, {
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
             sendAudio: sendAudioFn,
             sendBinary: hostedSendBinary,
-            ...voiceAgentDeps('openai'),
+            ...voiceAgentDeps(),
             apiKey: openaiKey,
-            ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
-            ...(hostedVoices.openai !== undefined ? { voice: hostedVoices.openai } : {}),
-            model: openaiRealtimeModelFor(cell.layer ?? 'light', {
-              light: opts.openaiRealtimeModelLight,
-              heavy: opts.openaiRealtimeModelHeavy,
-            }),
+            // refuseChoice() has refused a session with no model.
+            model: setup.model!,
             onFatal,
             ...(device ? { device } : {}),
             ...managerDeps,
             ...(opts.openaiWsCtor ? { wsCtor: opts.openaiWsCtor } : {}),
             ...(opts.openaiWsUrl ? { wsUrl: opts.openaiWsUrl } : {}),
           });
-        } else if (voiceSurface !== 'dictation' && cell.backend === 'elevenlabs') {
+        } else if (voiceSurface !== 'dictation' && backend === 'elevenlabs') {
           const elevenKey = readKey(opts.elevenLabsApiKey);
           if (elevenKey === undefined) {
             rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage(voiceSurface, 'elevenlabs'));
             return;
           }
+          if (refuseChoice()) return;
           if (!opts.makeTimeline) throw new Error('audio server: hosted voice needs makeTimeline');
           session = new ElevenLabsAgentSession(sessionInit, {
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
             sendAudio: sendAudioFn,
             sendBinary: hostedSendBinary,
-            ...voiceAgentDeps('elevenlabs'),
+            ...voiceAgentDeps(),
             apiKey: elevenKey,
-            ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
-            ...(hostedVoices.elevenlabs !== undefined ? { voiceId: hostedVoices.elevenlabs } : {}),
-            llm: elevenLabsAgentLlmFor(cell.layer ?? 'light', {
-              light: opts.elevenLabsAgentLlmLight,
-              heavy: opts.elevenLabsAgentLlmHeavy,
-            }),
+            // refuseChoice() has refused a session with no model.
+            llm: setup.model!,
             onFatal,
             ...(device ? { spokenAloud: device.prompt() } : {}),
             ...managerDeps,
@@ -1212,26 +1210,8 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             rejectConn(ws, 'invalid_frame', 'mode sessionId mismatch with this session');
             return;
           }
-          // spec/07 § Session modes — one session, two policies, but only
-          // while both modes are configured onto the SAME engine. Flipping in
-          // place across engines would keep running the one the new mode is
-          // not configured for; the surface opens a fresh session instead.
-          if (
-            isAppCall &&
-            !modesShareVoiceEngine(
-              opts.getVoiceConfig?.() ?? DEFAULT_VOICE_CONFIG,
-              session.getMode(),
-              parsed.mode,
-            )
-          ) {
-            send(ws, {
-              type: 'audio.error',
-              code: 'voice_config_not_implemented',
-              message: `${parsed.mode} is configured for a different voice engine than ${session.getMode()}; end this session and start a new one in ${parsed.mode}`,
-              sessionId: urlSessionId,
-            });
-            break;
-          }
+          // spec/07 § Session modes — one session, two policies: both modes run
+          // on the one voice agent, so the switch is always in place.
           session.setMode(parsed.mode);
           break;
         }

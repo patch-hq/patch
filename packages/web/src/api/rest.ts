@@ -37,6 +37,7 @@ import { assertVersionReport, type RecentVoice } from '@patch/wire';
 import { loadCredential } from '../lib/credential.js';
 import { hookImages } from '../lib/hookImages.js';
 import type { OutgoingFile } from '../lib/sendQueue.js';
+import type { AudioSessionRole } from '@patch/wire/audio';
 
 /** The backends whose accounts are shared settings. */
 export type SharedBackendId = 'claude-code' | 'codex';
@@ -338,15 +339,6 @@ export interface WebBotAuthStatus {
   agentUrl: string;
   directoryUrl: string;
   keyId: string;
-}
-
-export type VoiceBackend = 'local' | 'gemini' | 'openai' | 'elevenlabs';
-export type VoiceLayer = 'direct' | 'light' | 'heavy';
-export type VoiceHandoff = 'auto' | 'always' | 'never';
-export interface VoiceSurfaceConfig {
-  backend: VoiceBackend;
-  layer: VoiceLayer;
-  handoff: VoiceHandoff;
 }
 
 /** One Pad as the server serves it (spec/14 § Pads). */
@@ -934,7 +926,7 @@ export const api = {
   // Returns the raw `token` (presented in the host audio WSS session_start
   // frame), the `sessionId`, the relative `audioUrl` (`/audio/<sessionId>`),
   // and the token expiry.
-  voiceToken: (chatId: string, role: 'voice-note' | 'voice-call' | 'voice-device-conv') =>
+  voiceToken: (chatId: string, role: AudioSessionRole) =>
     request<{ token: string; sessionId: string; audioUrl: string; expiresAt: number }>(
       '/api/voice/token',
       {

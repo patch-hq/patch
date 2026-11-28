@@ -25,19 +25,20 @@ import {
 import type { WhisperBackend } from '../src/audio/whisper.js';
 import { createKokoro } from '../src/audio/kokoro.js';
 import type { Vad, VadFrameResult } from '../src/audio/vad.js';
-import {
-  DEFAULT_GEMINI_LIVE_MODEL,
-  DEFAULT_GEMINI_LIVE_HEAVY_MODEL,
-} from '../src/audio/gemini-live.js';
-import { DEFAULT_OPENAI_REALTIME_MODELS, type OpenAIWsCtor } from '../src/audio/openai-realtime.js';
+import { DEFAULT_GEMINI_LIVE_MODEL } from '../src/audio/gemini-live.js';
+import type { OpenAIWsCtor } from '../src/audio/openai-realtime.js';
 import {
   encodeAudio,
   decodeAudio,
+  DEFAULT_VOICE_AGENT,
   DEFAULT_VOICE_CONFIG,
   type AudioEvent,
   type AudioSessionMode,
   type AudioSessionRole,
+  type VoiceAgentProvider,
+  type VoiceAgentSetting,
   type VoiceConfig,
+  type VoiceTones,
 } from '@patch/wire/audio';
 
 const SECRET = 'unit-test-internal-token-aaaaaaaaaa';
@@ -169,6 +170,7 @@ describe('audio server — hosted backends on every app surface', () => {
   let openai: FakeOpenAIWs[] = [];
   let eleven: Array<{ url: string }> = [];
   const elevenRest: string[] = [];
+  const elevenBodies: Array<{ path: string; body: unknown }> = [];
   const submitted: Array<{ chatId: string; message: string }> = [];
   const transcribers = {
     local: fakeTranscriber('local words'),
@@ -179,6 +181,7 @@ describe('audio server — hosted backends on every app surface', () => {
     openai = [];
     eleven = [];
     elevenRest.length = 0;
+    elevenBodies.length = 0;
     submitted.length = 0;
     for (const t of Object.values(transcribers)) t.calls = 0;
     if (server) await server.close();
@@ -220,6 +223,7 @@ describe('audio server — hosted backends on every app surface', () => {
       elevenLabsFetch: (async (url: string, init: RequestInit) => {
         const path = new URL(url).pathname;
         elevenRest.push(`${init.method} ${path}`);
+        if (typeof init.body === 'string') elevenBodies.push({ path, body: JSON.parse(init.body) });
         if (path === '/v1/convai/tools') return Response.json({ id: 't1' });
         if (path === '/v1/convai/agents/create') return Response.json({ agent_id: 'a1' });
         if (path.includes('get-signed-url')) return Response.json({ signed_url: 'wss://signed/c' });
@@ -281,7 +285,8 @@ describe('audio server — hosted backends on every app surface', () => {
     const log: string[] = [];
     const started: string[] = [];
     const ended: Array<Parameters<NonNullable<AudioServerOptions['onCallEnded']>>[0]> = [];
-    const s = await start({ call: { backend: 'gemini', layer: 'light' } }, undefined, {
+    const s = await start({}, undefined, {
+      ...on('gemini'),
       makeTimeline: () => ({
         userSaid: (chatId, text) => log.push(`user:${chatId}:${text}`),
         beginReply: (chatId) => {
@@ -348,54 +353,85 @@ describe('audio server — hosted backends on every app surface', () => {
     expect(ended).toHaveLength(0);
   });
 
-  // --- call / hands-free × backend × layer --------------------------------
+  // --- call / hands-free × provider ---------------------------------------
 
-  const CONVERSATIONAL: Array<[AudioSessionMode, 'call' | 'handsFree']> = [
-    ['call', 'call'],
-    ['hands-free', 'handsFree'],
-  ];
-  for (const [mode, key] of CONVERSATIONAL) {
-    for (const layer of ['light', 'heavy'] as const) {
-      test(`${mode} on gemini/${layer} dials Gemini Live with the ${layer} model`, async () => {
-        const s = await start({ [key]: { backend: 'gemini', layer } });
-        const surface = await openSurface(s.port, `g-${mode}-${layer}`, 'voice-call', mode);
-        await until(() =>
-          expect(surface.events).toContainEqual(
-            expect.objectContaining({ type: 'audio.state', state: 'listening' }),
-          ),
-        );
-        expect(gemini).toHaveLength(1);
-        expect(openai).toHaveLength(0);
-        const setup = JSON.parse(gemini[0]!.sent[0]!) as { setup: { model: string } };
-        expect(setup.setup.model).toBe(
-          layer === 'heavy' ? DEFAULT_GEMINI_LIVE_HEAVY_MODEL : DEFAULT_GEMINI_LIVE_MODEL,
-        );
-        surface.ws.close();
+  /** The voice agent on `provider`, with `setup` over its default setup. */
+  function on(
+    provider: VoiceAgentProvider,
+    setup: Partial<VoiceAgentSetting['setups'][VoiceAgentProvider]> = {},
+    tones: VoiceTones = {},
+  ): Partial<AudioServerOptions> {
+    const agent: VoiceAgentSetting = {
+      provider,
+      setups: {
+        ...DEFAULT_VOICE_AGENT.setups,
+        [provider]: { ...DEFAULT_VOICE_AGENT.setups[provider], ...setup },
+      },
+    };
+    return { getVoiceAgent: () => agent, getVoiceTones: () => tones };
+  }
+
+  for (const mode of ['call', 'hands-free'] as const) {
+    test(`${mode} on gemini dials Gemini Live with the chosen model, voice, tone and sound`, async () => {
+      const s = await start({}, undefined, {
+        ...on(
+          'gemini',
+          { model: 'models/gemini-x', voice: 'Kore', sound: { matchTone: true } },
+          { 'gemini:Kore': 'Calm and sincere.' },
+        ),
       });
-
-      test(`${mode} on openai/${layer} dials OpenAI Realtime with the ${layer} model and a bearer key`, async () => {
-        const s = await start({ [key]: { backend: 'openai', layer } });
-        const surface = await openSurface(s.port, `o-${mode}-${layer}`, 'voice-call', mode);
-        await until(() =>
-          expect(surface.events).toContainEqual(
-            expect.objectContaining({ type: 'audio.state', state: 'listening' }),
-          ),
-        );
-        expect(openai).toHaveLength(1);
-        expect(gemini).toHaveLength(0);
-        expect(openai[0]!.url).toContain(`model=${DEFAULT_OPENAI_REALTIME_MODELS[layer]}`);
-        expect(openai[0]!.opts.headers['Authorization']).toBe('Bearer o-key');
-        // hands-free is gated by the address word: the provider must not answer on its own.
-        const update = openai[0]!.sent[0] as {
-          session: { audio: { input: { turn_detection: { create_response: boolean } } } };
+      const surface = await openSurface(s.port, `g-${mode}`, 'voice-call', mode);
+      await until(() =>
+        expect(surface.events).toContainEqual(
+          expect.objectContaining({ type: 'audio.state', state: 'listening' }),
+        ),
+      );
+      expect(gemini).toHaveLength(1);
+      expect(openai).toHaveLength(0);
+      const setup = JSON.parse(gemini[0]!.sent[0]!) as {
+        setup: {
+          model: string;
+          generationConfig: Record<string, unknown>;
+          systemInstruction: { parts: [{ text: string }] };
         };
-        expect(update.session.audio.input.turn_detection.create_response).toBe(mode === 'call');
-        surface.ws.close();
+      };
+      expect(setup.setup.model).toBe('models/gemini-x');
+      expect(setup.setup.generationConfig).toMatchObject({
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
+        enableAffectiveDialog: true,
       });
-    }
+      expect(setup.setup.systemInstruction.parts[0].text).toContain('Calm and sincere.');
+      surface.ws.close();
+    });
 
-    test(`${mode} on openai with no key is refused as voice_key_missing — never local`, async () => {
-      const s = await start({ [key]: { backend: 'openai', layer: 'light' } }, { gemini: true });
+    test(`${mode} on openai dials OpenAI Realtime with the chosen model, speed and a bearer key`, async () => {
+      const s = await start({}, undefined, on('openai', { model: 'gpt-x', sound: { speed: 1.2 } }));
+      const surface = await openSurface(s.port, `o-${mode}`, 'voice-call', mode);
+      await until(() =>
+        expect(surface.events).toContainEqual(
+          expect.objectContaining({ type: 'audio.state', state: 'listening' }),
+        ),
+      );
+      expect(openai).toHaveLength(1);
+      expect(gemini).toHaveLength(0);
+      expect(openai[0]!.url).toContain('model=gpt-x');
+      expect(openai[0]!.opts.headers['Authorization']).toBe('Bearer o-key');
+      const update = openai[0]!.sent[0] as {
+        session: {
+          audio: {
+            input: { turn_detection: { create_response: boolean } };
+            output: { voice: string; speed: number };
+          };
+        };
+      };
+      // hands-free is gated by the address word: the provider must not answer on its own.
+      expect(update.session.audio.input.turn_detection.create_response).toBe(mode === 'call');
+      expect(update.session.audio.output).toMatchObject({ voice: 'marin', speed: 1.2 });
+      surface.ws.close();
+    });
+
+    test(`${mode} on openai with no key is refused as voice_key_missing`, async () => {
+      const s = await start({}, { gemini: true }, on('openai'));
       const surface = await openSurface(s.port, `o-nokey-${mode}`, 'voice-call', mode);
       await surface.closed;
       const label = mode === 'call' ? 'Call' : 'Hands-free';
@@ -411,8 +447,8 @@ describe('audio server — hosted backends on every app surface', () => {
       expect(openai).toHaveLength(0);
     });
 
-    test(`${mode} on elevenlabs with no key is refused as voice_key_missing — never local`, async () => {
-      const s = await start({ [key]: { backend: 'elevenlabs', layer: 'light' } });
+    test(`${mode} on elevenlabs with no key is refused as voice_key_missing`, async () => {
+      const s = await start({}, undefined, on('elevenlabs'));
       const surface = await openSurface(s.port, `e-nokey-${mode}`, 'voice-call', mode);
       await surface.closed;
       const label = mode === 'call' ? 'Call' : 'Hands-free';
@@ -429,10 +465,18 @@ describe('audio server — hosted backends on every app surface', () => {
       expect(elevenRest).toHaveLength(0);
     });
 
-    test(`${mode} on elevenlabs provisions an agent and dials its signed URL`, async () => {
+    test(`${mode} on elevenlabs provisions an agent with its sound and dials its signed URL`, async () => {
       const s = await start(
-        { [key]: { backend: 'elevenlabs', layer: 'light' } },
+        {},
         { elevenlabs: true },
+        on(
+          'elevenlabs',
+          {
+            voice: 'v-rachel',
+            sound: { speechModel: 'eleven_v3_conversational', eagerness: 'eager' },
+          },
+          { 'elevenlabs:v-rachel': 'Warm. [whispers] secrets, [laughs] at jokes.' },
+        ),
       );
       const surface = await openSurface(s.port, `e-${mode}`, 'voice-call', mode);
       await until(() => expect(eleven).toHaveLength(1));
@@ -447,14 +491,52 @@ describe('audio server — hosted backends on every app surface', () => {
         'POST /v1/convai/agents/create',
         'GET /v1/convai/conversation/get-signed-url',
       ]);
+      const cc = (
+        elevenBodies.find((b) => b.path === '/v1/convai/agents/create')!.body as {
+          conversation_config: {
+            agent: { prompt: { prompt: string; llm: string } };
+            tts: Record<string, unknown>;
+            turn: Record<string, unknown>;
+          };
+        }
+      ).conversation_config;
+      expect(cc.agent.prompt.llm).toBe('claude-haiku-4-5');
+      expect(cc.agent.prompt.prompt).toContain('Warm. [whispers] secrets');
+      expect(cc.tts).toMatchObject({
+        voice_id: 'v-rachel',
+        model_id: 'eleven_v3_conversational',
+        stability: 0.7,
+        similarity_boost: 0.8,
+        speed: 0.95,
+        expressive_mode: true,
+        agent_output_audio_format: 'pcm_24000',
+        suggested_audio_tags: [{ tag: 'whispers' }, { tag: 'laughs' }],
+      });
+      expect(cc.turn).toEqual({ turn_eagerness: 'eager' });
       expect(gemini).toHaveLength(0);
       expect(openai).toHaveLength(0);
       surface.ws.close();
     });
   }
 
+  test('a stored model the provider no longer lists is refused at the start, naming it', async () => {
+    const s = await start({}, undefined, {
+      ...on('openai', { model: 'gpt-gone' }),
+      getVoiceCatalog: () => ({ at: 1, models: [{ id: 'gpt-realtime-2.1', label: 'x' }] }),
+    });
+    const surface = await openSurface(s.port, 'o-gone', 'voice-call', 'call');
+    await surface.closed;
+    expect(surface.events[0]).toEqual({
+      type: 'audio.error',
+      code: 'openai_unavailable',
+      message:
+        "The voice agent's model gpt-gone is no longer offered by OpenAI. Choose another in Settings → Voice calls.",
+    });
+    expect(openai).toHaveLength(0);
+  });
+
   test('an OpenAI session whose provider hangs up ends the surface session loudly', async () => {
-    const s = await start({ call: { backend: 'openai', layer: 'light' } });
+    const s = await start({}, undefined, on('openai'));
     const surface = await openSurface(s.port, 'o-drop', 'voice-call', 'call');
     await until(() => expect(openai).toHaveLength(1));
     await until(() =>
@@ -475,7 +557,7 @@ describe('audio server — hosted backends on every app surface', () => {
   });
 
   test('a Gemini session whose provider hangs up ends the surface session loudly', async () => {
-    const s = await start({ call: { backend: 'gemini', layer: 'light' } });
+    const s = await start({}, undefined, on('gemini'));
     const surface = await openSurface(s.port, 'g-drop', 'voice-call', 'call');
     await until(() =>
       expect(surface.events).toContainEqual(
@@ -489,29 +571,8 @@ describe('audio server — hosted backends on every app surface', () => {
     );
   });
 
-  test('switching mode in place across engines is refused; the session keeps its mode', async () => {
-    const s = await start({
-      call: { backend: 'openai', layer: 'light' },
-      handsFree: { backend: 'gemini', layer: 'light' },
-    });
-    const surface = await openSurface(s.port, 'mix-1', 'voice-call', 'call');
-    await until(() => expect(openai).toHaveLength(1));
-    surface.ws.send(encodeAudio({ type: 'audio.mode', sessionId: 'mix-1', mode: 'hands-free' }));
-    await until(() =>
-      expect(surface.events).toContainEqual(
-        expect.objectContaining({ type: 'audio.error', code: 'voice_config_not_implemented' }),
-      ),
-    );
-    // No session.update for the new mode ever went to the provider.
-    expect(openai[0]!.sent.filter((m) => m['type'] === 'session.update')).toHaveLength(1);
-    surface.ws.close();
-  });
-
-  test('switching mode in place on the same engine flips the provider turn detection', async () => {
-    const s = await start({
-      call: { backend: 'openai', layer: 'light' },
-      handsFree: { backend: 'openai', layer: 'light' },
-    });
+  test('switching mode flips in place on the one voice agent: the provider turn detection follows', async () => {
+    const s = await start({}, undefined, on('openai'));
     const surface = await openSurface(s.port, 'same-1', 'voice-call', 'call');
     await until(() =>
       expect(surface.events).toContainEqual(
@@ -527,7 +588,7 @@ describe('audio server — hosted backends on every app surface', () => {
   });
 
   test('a device on openai runs it, and gets the reply upsampled to 48 kHz', async () => {
-    const s = await start({ device: { backend: 'openai', layer: 'light' } });
+    const s = await start({ deviceAnswer: 'agent' }, undefined, on('openai'));
     const ws = new WebSocket(`ws://127.0.0.1:${s.port}/audio/dev-1`);
     const events: AudioEvent[] = [];
     const binaries: Buffer[] = [];

@@ -7,6 +7,7 @@
 // phone scans (`POST /api/auth/pair/start`).
 
 import React from 'react';
+import { DeviceAnswerRows } from './VoiceDeviceAnswer';
 import { Alert, Pressable, Text, View, useColorScheme } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { create as createQr } from 'qrcode';
@@ -224,37 +225,44 @@ export function VoiceDevicesSection(): React.ReactElement {
       <WithSettings testID="voice-devices">
         {(data) => {
           const voice = data.devices.filter((d) => d.surfaceKind === 'voice-device');
-          return voice.length === 0 ? (
-            <Row
-              testID="voice-devices-empty"
-              title="None yet"
-              subtitle="Add one from Settings → Voice calls on the computer."
-              subtitleTestID="voice-devices-how"
-            />
-          ) : (
+          const list =
+            voice.length === 0 ? (
+              <Row
+                testID="voice-devices-empty"
+                title="None yet"
+                subtitle="Add one from Settings → Voice calls on the computer."
+                subtitleTestID="voice-devices-how"
+              />
+            ) : (
+              <>
+                {voice.map((d) => (
+                  <Row
+                    key={d.surfaceId}
+                    testID={`voice-device-${d.surfaceId}`}
+                    leading={<Dot on={d.status === 'online'} />}
+                    title={friendlyDeviceName(d.surfaceKind, d.label)}
+                    subtitle={deviceSubtitle(d)}
+                    right={
+                      <SettingsButton
+                        testID={`voice-device-revoke-${d.surfaceId}`}
+                        label="Revoke"
+                        variant="danger"
+                        onPress={() => {
+                          void api
+                            .revoke(d.surfaceId)
+                            .then(() => useSettingsStore.getState().load())
+                            .catch((e: Error) => Alert.alert('Revoke failed', e.message));
+                        }}
+                      />
+                    }
+                  />
+                ))}
+              </>
+            );
+          return (
             <>
-              {voice.map((d) => (
-                <Row
-                  key={d.surfaceId}
-                  testID={`voice-device-${d.surfaceId}`}
-                  leading={<Dot on={d.status === 'online'} />}
-                  title={friendlyDeviceName(d.surfaceKind, d.label)}
-                  subtitle={deviceSubtitle(d)}
-                  right={
-                    <SettingsButton
-                      testID={`voice-device-revoke-${d.surfaceId}`}
-                      label="Revoke"
-                      variant="danger"
-                      onPress={() => {
-                        void api
-                          .revoke(d.surfaceId)
-                          .then(() => useSettingsStore.getState().load())
-                          .catch((e: Error) => Alert.alert('Revoke failed', e.message));
-                      }}
-                    />
-                  }
-                />
-              ))}
+              <DeviceAnswerRows preferences={data.preferences} />
+              {list}
             </>
           );
         }}

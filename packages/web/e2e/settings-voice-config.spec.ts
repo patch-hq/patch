@@ -12,58 +12,134 @@ async function expectChosen(page: Page, testid: string, label: string): Promise<
   await expect.poll(() => chosen(page, testid)).toBe(label);
 }
 
-// Real-browser e2e for Settings → Voice (spec/07 § Voice): ONE config for
-// every voice conversation — calls, hands-free and voice devices — a provider,
-// its model and voice, and the hand-off switch. Dictation lists every device
-// with its own engine.
-test.describe('Settings — Voice', () => {
+/** Merge `extra` into host d1's report, as a host's next `host.host` would. */
+async function reportHost(page: Page, extra: Record<string, unknown>): Promise<void> {
+  await page.evaluate((patch) => {
+    const store = (
+      window as unknown as {
+        __presenceStore: {
+          getState(): {
+            hosts: Record<string, { host: Record<string, unknown> | null }>;
+            setHostReport(r: Record<string, unknown>): void;
+          };
+        };
+      }
+    ).__presenceStore;
+    const host = store.getState().hosts['d1']!.host!;
+    store.getState().setHostReport({ ...host, type: 'host.host', ...patch });
+  }, extra);
+}
+
+/** What a host read from each provider (spec/07 § The voice agent). */
+const CATALOG = {
+  voiceKeys: { gemini: true, openai: true, elevenlabs: true, deepgram: false },
+  voiceCatalog: {
+    gemini: {
+      at: 1,
+      models: [
+        {
+          id: 'models/gemini-2.5-flash-native-audio-preview-12-2025',
+          label: 'Gemini 2.5 Flash Native Audio',
+        },
+      ],
+      voices: [
+        { id: 'Puck', label: 'Puck' },
+        { id: 'Kore', label: 'Kore' },
+      ],
+    },
+    openai: {
+      at: 1,
+      models: [{ id: 'gpt-realtime-2.1-mini', label: 'gpt-realtime-2.1-mini' }],
+      voices: [{ id: 'marin', label: 'marin' }],
+    },
+    elevenlabs: {
+      at: 1,
+      models: [{ id: 'claude-haiku-4-5', label: 'claude-haiku-4-5' }],
+      voices: [{ id: 'v-rachel', label: 'Rachel' }],
+      speechModels: [{ id: 'eleven_v3_conversational', label: 'Eleven v3 conversational' }],
+    },
+  },
+};
+
+// Real-browser e2e for Settings → Voice calls (spec/14 § Voice): the voice
+// agent revealed one choice at a time — provider, model, voice, then only that
+// provider's sound controls — then Agents calling you and Calls.
+test.describe('Settings — Voice calls', () => {
   test.beforeEach(async ({ page }) => {
     await stubSettingsApi(page);
     await page.goto(settingsUrl('voice'));
-    await expect(page.getByTestId('settings-voice-config')).toBeVisible();
+    await expect(page.getByTestId('settings-voice-agent')).toBeVisible();
   });
 
-  test('one provider choice, the three voice agents, with Gemini the default', async ({ page }) => {
-    await expect(page.getByTestId('voice-engine').locator('button')).toHaveText([
+  test('three providers, no Local; each choice appears once the one before is made', async ({
+    page,
+  }) => {
+    await expect(page.getByTestId('voice-agent-provider').locator('button')).toHaveText([
       'Gemini',
       'OpenAI',
       'ElevenLabs',
     ]);
-    await expectChosen(page, 'voice-engine', 'Gemini');
-    // Calls are voice agent calls: Local is no longer a choice here (a voice
-    // device answered directly keeps its own host-speech rows, further down).
-    await expect(page.getByTestId('voice-engine-local')).toHaveCount(0);
-    // No per-surface rows, no chat title, no "Speaking" section.
-    for (const surface of ['device', 'handsFree', 'call']) {
-      await expect(page.getByTestId(`voice-${surface}-engine`)).toHaveCount(0);
-    }
-    await expect(page.getByText('Speaking', { exact: true })).toHaveCount(0);
-    await expect(page.getByTestId('chat-name-interval')).toHaveCount(0);
+    await expectChosen(page, 'voice-agent-provider', 'Gemini');
+    await reportHost(page, CATALOG);
+    await expect(page.getByTestId('voice-agent-model-status')).toContainText('1 model');
+    await expect(page.getByTestId('voice-agent-sound')).toHaveCount(0);
+    await page.getByTestId('voice-agent-voice').selectOption('Kore');
+    await expect(page.getByTestId('voice-agent-sound')).toBeVisible();
+    await expect(page.getByTestId('voice-agent-tone')).toBeVisible();
+    await expect(page.getByTestId('voice-agent-matchTone')).toBeAttached();
+    await expect(page.getByTestId('voice-agent-stability')).toHaveCount(0);
   });
 
-  test('a hosted provider: model, its own voice, and the hand-off switch', async ({ page }) => {
-    await page.getByTestId('voice-engine-gemini').click();
-    await expectChosen(page, 'voice-engine', 'Gemini');
-    await page.getByTestId('voice-variant-heavy').click();
-    await expectChosen(page, 'voice-variant', 'Gemini 3.8 Live Thinking');
-    await expect(page.getByTestId('voice-gemini-voice')).toBeVisible();
-    await expect(page.getByTestId('voice-handoff-toggle')).toBeChecked();
-    await page.getByTestId('voice-engine-openai').click();
-    await expectChosen(page, 'voice-variant', 'GPT Realtime 2.1');
-    await expect(page.getByTestId('voice-openai-voice')).toBeVisible();
-    await expect(page.getByTestId('voice-gemini-voice')).toHaveCount(0);
+  test('ElevenLabs shows its own controls with calm defaults; OpenAI only tone and speed', async ({
+    page,
+  }) => {
+    await reportHost(page, CATALOG);
+    await page.getByTestId('voice-agent-provider-elevenlabs').click();
+    await expectChosen(page, 'voice-agent-provider', 'ElevenLabs');
+    await page.getByTestId('voice-agent-voice').selectOption('v-rachel');
+    await expect(page.getByTestId('voice-agent-stability-value')).toHaveText('0.7');
+    await expect(page.getByTestId('voice-agent-speed-value')).toHaveText('0.95×');
+    await expect(page.getByTestId('voice-agent-stability-row')).toContainText('Expressive');
+    await expect(page.getByTestId('voice-agent-stability-row')).toContainText('Steady');
+    await expectChosen(page, 'voice-agent-eagerness', 'Patient');
+    await page.getByTestId('voice-agent-provider-openai').click();
+    await expectChosen(page, 'voice-agent-provider', 'OpenAI');
+    await expect(page.getByTestId('voice-agent-speed-value')).toHaveText('1×');
+    await expect(page.getByTestId('voice-agent-stability')).toHaveCount(0);
+    await expect(page.getByTestId('voice-agent-eagerness')).toHaveCount(0);
   });
 
-  test('row labels stay readable at phone width — chips sit under the label', async ({ page }) => {
+  test('Agents calling you and Calls', async ({ page }) => {
+    await expect(page.getByTestId('agents-can-call-row')).toContainText('Rings every device');
+    await expect(page.getByTestId('agent-call-auto-answer-row')).toContainText(
+      'Pauses playback while the agent talks',
+    );
+    await expect(page.getByTestId('pause-when-quiet').locator('button')).toHaveText([
+      'Off',
+      '2 min',
+      '5 min',
+      '10 min',
+      '30 min',
+    ]);
+    await expectChosen(page, 'pause-when-quiet', 'Off');
+    await page.getByTestId('pause-when-quiet-5').click();
+    await expectChosen(page, 'pause-when-quiet', '5 min');
+  });
+
+  test('row labels stay readable at phone width', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 });
-    await page.getByTestId('voice-engine-elevenlabs').click();
-    const title = page.getByTestId('voice-provider').locator('.set-row-title');
-    const box = await title.boundingBox();
-    expect(box!.width).toBeGreaterThan(40);
-    expect(box!.height).toBeLessThan(30);
-    const handoff = page.getByTestId('voice-handoff-row');
-    await expect(handoff).toContainText('Pass work to the chat’s agent');
-    expect((await handoff.locator('.set-row-title').boundingBox())!.height).toBeLessThan(60);
+    await reportHost(page, CATALOG);
+    await page.getByTestId('voice-agent-provider-elevenlabs').click();
+    await page.getByTestId('voice-agent-voice').selectOption('v-rachel');
+    for (const row of [
+      'voice-provider',
+      'voice-agent-eagerness-row',
+      'voice-agent-stability-row',
+    ]) {
+      const box = await page.getByTestId(row).locator('.set-row-title').boundingBox();
+      expect(box!.width).toBeGreaterThan(40);
+      expect(box!.height).toBeLessThan(30);
+    }
   });
 
   test('usage is one account-wide summary in tokens and credits, not dollars per host', async ({
@@ -125,7 +201,6 @@ test.describe('Settings — Voice', () => {
         voiceKeys: { gemini: false, openai: true, deepgram: false },
       });
     });
-    await page.getByTestId('voice-engine-gemini').click();
     const line = page.getByTestId('voice-keys');
     await expect(line).toHaveText(
       'Not configured on dev-host: no Gemini key is set. Sessions there are refused.',
@@ -135,7 +210,7 @@ test.describe('Settings — Voice', () => {
       (el) => getComputedStyle(el.closest('.set-sub') as HTMLElement).color,
     );
     expect(color).not.toBe(hint);
-    await page.getByTestId('voice-engine-openai').click();
+    await page.getByTestId('voice-agent-provider-openai').click();
     await expect(page.getByTestId('voice-keys')).toHaveCount(0);
   });
 });

@@ -1,20 +1,16 @@
 // lib/voiceEngine.ts + the voice-config half of lib/preferences.ts.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { DEFAULT_VOICE_CONFIG, type VoiceConfig } from '@patch/wire/audio';
+import { DEFAULT_VOICE_AGENT, DEFAULT_VOICE_CONFIG, type VoiceConfig } from '@patch/wire/audio';
 
 const { settingsMock } = vi.hoisted(() => ({ settingsMock: vi.fn() }));
 vi.mock('../src/api/rest', () => ({ api: { settings: settingsMock } }));
 
-import {
-  callEngineLabel,
-  describeMicSilent,
-  describeVoiceError,
-  modeSwitchNeedsNewSession,
-} from '../src/lib/voiceEngine';
+import { callEngineLabel, describeMicSilent, describeVoiceError } from '../src/lib/voiceEngine';
 import {
   __resetPreferences,
   loadPreferences,
+  voiceAgentOrNull,
   voiceConfigOrNull,
   addressWordOrNull,
 } from '../src/lib/preferences';
@@ -24,35 +20,22 @@ import type { SettingsResponse } from '../src/api/rest';
 const cfg = (over: Partial<VoiceConfig>): VoiceConfig => ({ ...DEFAULT_VOICE_CONFIG, ...over });
 
 describe('callEngineLabel', () => {
-  it('names hosted engines with their layer, per mode', () => {
-    const c = cfg({
-      call: { backend: 'gemini', layer: 'heavy', handoff: 'auto' },
-      handsFree: { backend: 'openai', layer: 'light', handoff: 'auto' },
-    });
-    expect(callEngineLabel(c, 'call')).toBe('Gemini Live · heavy');
-    expect(callEngineLabel(c, 'hands-free')).toBe('OpenAI Realtime · light');
+  it('names the voice agent provider and its model', () => {
+    expect(callEngineLabel(DEFAULT_VOICE_AGENT)).toBe(
+      'Gemini · gemini-2.5-flash-native-audio-preview-12-2025',
+    );
+    expect(callEngineLabel({ ...DEFAULT_VOICE_AGENT, provider: 'openai' })).toBe(
+      'OpenAI · gpt-realtime-2.1-mini',
+    );
   });
-  it('a hosted "direct" runs as light, and says so', () => {
+  it('names nothing before the setup has loaded, or with no model chosen', () => {
+    expect(callEngineLabel(null)).toBeNull();
     expect(
-      callEngineLabel(
-        cfg({ call: { backend: 'openai', layer: 'direct', handoff: 'auto' } }),
-        'call',
-      ),
-    ).toBe('OpenAI Realtime · light');
-  });
-  it('names the default voice agent, and nothing with no config yet', () => {
-    expect(callEngineLabel(DEFAULT_VOICE_CONFIG, 'call')).toBe('Gemini Live · light');
-    expect(callEngineLabel(null, 'hands-free')).toBeNull();
-  });
-});
-
-describe('modeSwitchNeedsNewSession', () => {
-  const mixed = cfg({ call: { backend: 'openai', layer: 'light', handoff: 'auto' } });
-  it('only when the two modes are on different engines', () => {
-    expect(modeSwitchNeedsNewSession(mixed, 'call', 'hands-free')).toBe(true);
-    expect(modeSwitchNeedsNewSession(DEFAULT_VOICE_CONFIG, 'call', 'hands-free')).toBe(false);
-    expect(modeSwitchNeedsNewSession(mixed, 'call', 'call')).toBe(false);
-    expect(modeSwitchNeedsNewSession(null, 'call', 'hands-free')).toBe(false);
+      callEngineLabel({
+        ...DEFAULT_VOICE_AGENT,
+        setups: { ...DEFAULT_VOICE_AGENT.setups, gemini: { sound: {} } },
+      }),
+    ).toBeNull();
   });
 });
 
@@ -91,12 +74,14 @@ describe('voiceConfigOrNull', () => {
   });
   it('null until loaded; the boot read; then a Settings load wins', async () => {
     expect(voiceConfigOrNull()).toBeNull();
-    const boot = cfg({ call: { backend: 'openai', layer: 'heavy', handoff: 'auto' } });
+    const boot = cfg({ deviceAnswer: 'agent' });
+    const agent = { ...DEFAULT_VOICE_AGENT, provider: 'elevenlabs' as const };
     settingsMock.mockResolvedValueOnce({
-      preferences: { addressWord: 'patch', voiceConfig: boot },
+      preferences: { addressWord: 'patch', voiceConfig: boot, voiceAgent: agent },
     });
     await loadPreferences();
     expect(voiceConfigOrNull()).toEqual(boot);
+    expect(voiceAgentOrNull()).toEqual(agent);
     expect(addressWordOrNull()).toBe('patch');
     const later = cfg({ dictation: { phone: 'deepgram', computer: 'whisper', tidy: true } });
     useSettingsStore.setState({

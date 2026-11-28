@@ -12,9 +12,7 @@ const FAKE_KEY = 'fake-deepgram-key-for-e2e-0000-LAST';
 const DEEPGRAM_ON_DICTATION = {
   voiceConfig: {
     dictation: { phone: 'deepgram', computer: 'deepgram', tidy: false },
-    device: { backend: 'local', layer: 'direct', handoff: 'auto' },
-    handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
-    call: { backend: 'local', layer: 'direct', handoff: 'auto' },
+    deviceAnswer: 'direct',
   },
 };
 

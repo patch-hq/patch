@@ -12,10 +12,21 @@
 // surface voice modules import this file.
 
 import { z } from 'zod';
+import { VoiceAgentProvider, type VoiceAgentSetting } from './voiceEngines.js';
 
 // --- session lifecycle -----------------------------------------------------
 
-export const AudioSessionRole = z.enum(['voice-note', 'voice-call', 'voice-device-conv']);
+/**
+ * `announcement`: an `auto-notify` interrupt spoken on a surface not in a
+ * call (spec/07 § Speaking with no session open) — the host reads the text
+ * aloud with its own speech engine; no microphone, no voice agent, no call.
+ */
+export const AudioSessionRole = z.enum([
+  'voice-note',
+  'voice-call',
+  'voice-device-conv',
+  'announcement',
+]);
 export type AudioSessionRole = z.infer<typeof AudioSessionRole>;
 
 /**
@@ -47,25 +58,14 @@ export function modeRequiresAddress(mode: AudioSessionMode): boolean {
   return mode === 'hands-free';
 }
 
-// --- voice config (spec/07 § Voice — a config matrix) ----------------------
+// --- voice config (spec/07) -------------------------------------------------
 //
-// Shared with the zod schemas in packages/server/src/settings.ts,
-// packages/wire/src/events.ts (`host.settings` → `voiceConfig`) and
-// packages/host/src/hostState.ts, which each declare their own zod copy of
-// this shape (this codebase's established pattern — see e.g. the repeated
-// `z.enum(['fallback','native'])` this superseded). This module holds the
-// plain TS types and the one place that decides WHICH of the four surfaces
-// an incoming session is, so that logic exists exactly once.
+// The zod schema is `VoiceConfigSetting` in events.ts; this module holds the
+// plain TS types and the one place that decides which surface an incoming
+// session is and which backend it runs on.
 
 export const VoiceBackend = z.enum(['local', 'gemini', 'openai', 'elevenlabs']);
 export type VoiceBackend = z.infer<typeof VoiceBackend>;
-/**
- * The voice agent providers (spec/07 § The voice agent). Calls and hands-free
- * always run on one: a call without a voice agent is a direct call, held on
- * the device. Only a voice device has a host-speech (`local`) conversation.
- */
-export const VoiceAgentBackend = z.enum(['gemini', 'openai', 'elevenlabs']);
-export type VoiceAgentBackend = z.infer<typeof VoiceAgentBackend>;
 
 /**
  * Where dictation's words come from (spec/07 § Dictation engines), named by
@@ -189,9 +189,6 @@ export const SPEECH_TO_TEXT_LABEL: Record<SpeechToTextEngine, string> = {
   elevenlabs: 'ElevenLabs Scribe',
 };
 
-export const VoiceLayer = z.enum(['direct', 'light', 'heavy']);
-export type VoiceLayer = z.infer<typeof VoiceLayer>;
-
 /**
  * Who does the work on a hosted voice (spec/07 § The fast voice and the chat's
  * agent): `auto` — the voice answers what it can and hands the rest to the
@@ -211,44 +208,95 @@ export type VoiceHandoff = z.infer<typeof VoiceHandoff>;
 export const MeetingEngine = z.enum(['local', 'elevenlabs', 'deepgram', 'assemblyai']);
 export type MeetingEngine = z.infer<typeof MeetingEngine>;
 
-export interface VoiceSurfaceConfig {
-  backend: VoiceBackend;
-  layer: VoiceLayer;
-  handoff: VoiceHandoff;
-}
-
-/** A call's or hands-free's cell: always a voice agent. */
-export interface VoiceAgentCellConfig extends VoiceSurfaceConfig {
-  backend: VoiceAgentBackend;
-}
+/**
+ * How a voice device's conversation is answered (spec/16): by the account's
+ * voice agent, or directly, with speech on the chat's host.
+ */
+export const DeviceAnswer = z.enum(['agent', 'direct']);
+export type DeviceAnswer = z.infer<typeof DeviceAnswer>;
 
 export interface VoiceConfig {
   speechToText: SpeechToTextEngine;
   dictation: DictationConfig;
   meeting: MeetingEngine;
-  device: VoiceSurfaceConfig;
-  handsFree: VoiceAgentCellConfig;
-  call: VoiceAgentCellConfig;
+  deviceAnswer: DeviceAnswer;
 }
-
-/** The voice agent a call starts on until the user picks one. */
-export const DEFAULT_VOICE_AGENT_CELL: VoiceAgentCellConfig = {
-  backend: 'gemini',
-  layer: 'light',
-  handoff: 'auto',
-};
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   speechToText: DEFAULT_SPEECH_TO_TEXT,
   dictation: { phone: 'device', computer: 'whisper', tidy: false },
   meeting: 'local',
-  device: { backend: 'local', layer: 'direct', handoff: 'auto' },
-  handsFree: DEFAULT_VOICE_AGENT_CELL,
-  call: DEFAULT_VOICE_AGENT_CELL,
+  deviceAnswer: 'direct',
 };
 
-/** The four independently-configurable voice surfaces (spec/07 § Voice). */
-export type VoiceSurface = 'dictation' | 'device' | 'hands-free' | 'call';
+// --- the voice agent (spec/07 § The voice agent) ---------------------------
+//
+// What each engine offers is described once, in voiceEngines.ts, and that one
+// description drives Settings on every surface and the host's provider config.
+export * from './voiceEngines.js';
+
+/**
+ * What a host read from a provider's API for Settings → Voice calls: its
+ * realtime models, its voices and (ElevenLabs) its speech models. `error` says
+ * why a read failed; the lists are then absent. A provider whose API has no
+ * voice list (Gemini, OpenAI) is given the voices its documentation names.
+ */
+const CatalogItem = z.object({ id: z.string().min(1), label: z.string() });
+export type CatalogItem = z.infer<typeof CatalogItem>;
+export const VoiceCatalogEntry = z.object({
+  models: z.array(CatalogItem).optional(),
+  voices: z.array(CatalogItem).optional(),
+  speechModels: z.array(CatalogItem).optional(),
+  error: z.string().optional(),
+  /** Epoch ms of the read. */
+  at: z.number().int().nonnegative(),
+});
+export type VoiceCatalogEntry = z.infer<typeof VoiceCatalogEntry>;
+export const VoiceCatalog = z.object({
+  gemini: VoiceCatalogEntry.optional(),
+  openai: VoiceCatalogEntry.optional(),
+  elevenlabs: VoiceCatalogEntry.optional(),
+});
+export type VoiceCatalog = z.infer<typeof VoiceCatalog>;
+
+/** What Settings shows for a provider's lists. */
+export type VoiceCatalogView =
+  | { state: 'ready'; entry: VoiceCatalogEntry; hostName: string }
+  | { state: 'loading' }
+  | { state: 'failed'; message: string }
+  | { state: 'no-key' };
+
+/**
+ * The read Settings → Voice calls lists a provider's models and voices from:
+ * the freshest successful read any host has made, online hosts first. With
+ * none, the failure says why; a host with the key that has not read yet is
+ * loading; no host with the key says so rather than showing an empty list.
+ */
+export function voiceCatalogView(
+  provider: VoiceAgentProvider,
+  hosts: ReadonlyArray<{
+    hostName: string;
+    online: boolean;
+    voiceKeys?: Partial<Record<VoiceAgentProvider, boolean | undefined>> | undefined;
+    voiceCatalog?: VoiceCatalog | undefined;
+  }>,
+): VoiceCatalogView {
+  const reads = hosts
+    .flatMap((h) => {
+      const entry = h.voiceCatalog?.[provider];
+      return entry ? [{ h, entry }] : [];
+    })
+    .sort((a, b) => Number(b.h.online) - Number(a.h.online) || b.entry.at - a.entry.at);
+  const ok = reads.find((r) => r.entry.error === undefined);
+  if (ok) return { state: 'ready', entry: ok.entry, hostName: ok.h.hostName };
+  const failed = reads[0];
+  if (failed) return { state: 'failed', message: `${failed.h.hostName}: ${failed.entry.error}` };
+  if (hosts.some((h) => h.voiceKeys?.[provider] === true)) return { state: 'loading' };
+  return { state: 'no-key' };
+}
+
+/** What a voice session is (spec/07): dictation, a voice device, a call in either mode, or a spoken alert. */
+export type VoiceSurface = 'dictation' | 'device' | 'hands-free' | 'call' | 'announcement';
 
 /**
  * Which of the four surfaces a session belongs to, from the signals already
@@ -261,7 +309,7 @@ export type VoiceSurface = 'dictation' | 'device' | 'hands-free' | 'call';
  * accepted ring — spec/16 treats the device as one surface, not two. Anything
  * else is `role: 'voice-call'`, split by `mode` into `'hands-free'` or
  * `'call'` (`mode` undefined defaults to `'call'`, per `AudioSessionMode`'s
- * own doc comment above).
+ * own doc comment above). `role: 'announcement'` is a spoken alert.
  */
 export function deriveVoiceSurface(args: {
   role: AudioSessionRole;
@@ -269,44 +317,28 @@ export function deriveVoiceSurface(args: {
   mode?: AudioSessionMode;
 }): VoiceSurface {
   if (args.role === 'voice-note') return 'dictation';
+  if (args.role === 'announcement') return 'announcement';
   if (args.surfaceKind === 'device') return 'device';
   if (args.mode === 'hands-free') return 'hands-free';
   return 'call';
 }
 
-/** A surface that holds a conversation, as opposed to dictation. */
-export type ConversationSurface = Exclude<VoiceSurface, 'dictation'>;
-
-/** The `{backend, layer, handoff}` cell a conversation surface runs on. */
-export function voiceCellFor(
-  config: VoiceConfig,
-  surface: 'call' | 'hands-free',
-): VoiceAgentCellConfig;
-export function voiceCellFor(config: VoiceConfig, surface: ConversationSurface): VoiceSurfaceConfig;
-export function voiceCellFor(
-  config: VoiceConfig,
-  surface: ConversationSurface,
-): VoiceSurfaceConfig {
-  if (surface === 'hands-free') return config.handsFree;
-  return config[surface];
-}
+/** A surface that holds a conversation, as opposed to dictation or a spoken alert. */
+export type ConversationSurface = Exclude<VoiceSurface, 'dictation' | 'announcement'>;
 
 /**
- * Whether a sustained session can switch `from` → `to` mode in place. Both
- * modes ride the same session only while they are configured onto the same
- * engine: flipping `call` (say, gemini/light) to `hands-free` (local/direct)
- * in place would keep running the engine the NEW mode is not configured for.
- * When this is false the surface ends the session and opens a fresh one in
- * the new mode, and the host refuses an in-place `audio.mode` switch.
+ * The backend a conversation surface runs on. A call and hands-free are always
+ * voice agent calls (spec/07 § Two kinds of call), on the account's one voice
+ * agent setup; a voice device answers on the voice agent too unless its own
+ * setting has it answer directly, with speech on the chat's host (`local`).
  */
-export function modesShareVoiceEngine(
+export function voiceBackendFor(
   config: VoiceConfig,
-  from: AudioSessionMode,
-  to: AudioSessionMode,
-): boolean {
-  const a = voiceCellFor(config, from === 'hands-free' ? 'hands-free' : 'call');
-  const b = voiceCellFor(config, to === 'hands-free' ? 'hands-free' : 'call');
-  return a.backend === b.backend && a.layer === b.layer && a.handoff === b.handoff;
+  agent: VoiceAgentSetting,
+  surface: ConversationSurface,
+): VoiceBackend {
+  if (surface === 'device' && config.deviceAnswer === 'direct') return 'local';
+  return agent.provider;
 }
 
 /** A backend that runs on a provider's API and so needs a key on the host. */
@@ -340,6 +372,7 @@ export const VOICE_SURFACE_LABEL: Record<VoiceSurface, string> = {
   device: 'Voice device',
   'hands-free': 'Hands-free',
   call: 'Call',
+  announcement: 'Spoken alert',
 };
 
 /**
@@ -402,6 +435,7 @@ export function voiceKeyHostStatus(
  */
 export function voiceSurfacesMissingKey(
   config: VoiceConfig,
+  agent: VoiceAgentSetting,
   keys: VoiceKeys,
 ): Array<{ surface: VoiceSurface | 'meeting'; backend: HostedVoiceBackend; env: string }> {
   const out: Array<{
@@ -429,7 +463,7 @@ export function voiceSurfacesMissingKey(
   }
   const surfaces: ConversationSurface[] = ['device', 'hands-free', 'call'];
   for (const surface of surfaces) {
-    const { backend } = voiceCellFor(config, surface);
+    const backend = voiceBackendFor(config, agent, surface);
     if (backend === 'local' || keys[backend] === true) continue;
     out.push({ surface, backend, env: VOICE_BACKEND_KEY_ENV[backend] });
   }

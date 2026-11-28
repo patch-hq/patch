@@ -26,6 +26,7 @@ vi.mock('../src/api/rest', async (orig) => ({
 function reportHost(): void {
   usePresenceStore.getState().setHostReport({
     type: 'host.host',
+    voiceCatalog: {},
     hostId: 'd1',
     hostName: 'hetzner',
     platform: 'linux',

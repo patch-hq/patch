@@ -43,12 +43,11 @@
 // sends the same `audio.session_start` and the same 16 kHz PCM up, and plays the
 // same 24 kHz PCM back through the same long-lived AudioTrack sink, and the
 // host runs whichever engine the account's voice config names for this
-// session's mode. No provider key or ephemeral token ever reaches the phone,
-// and no WebRTC module is needed. What the phone does with the config: it
-// names a hosted engine on the call bar (`callEngineLabel`), it opens a fresh
-// session when a mode switch crosses engines (`setCallMode`), and it names the
-// engine when one fails (`describeVoiceError`) — a hosted engine's failure is
-// never answered by running local instead.
+// session. No provider key or ephemeral token ever reaches the phone, and no
+// WebRTC module is needed. What the phone does with the voice agent setup: it
+// names the provider and model on the call bar (`callEngineLabel`), and names
+// the engine when one fails (`describeVoiceError`). Both modes run on the one
+// voice agent, so a mode switch is always in place.
 
 import { playCallSound, syncCallSoundLoop } from './callSounds';
 import { AppState } from 'react-native';
@@ -82,13 +81,8 @@ import {
   setDirectCallMuted,
   startDirectCall,
 } from './directCall';
-import { addressWordOrNull, pauseWhenQuietMinutes, voiceConfigOrNull } from './preferences';
-import {
-  callEngineLabel,
-  describeMicSilent,
-  describeVoiceError,
-  modeSwitchNeedsNewSession,
-} from './voiceEngine';
+import { addressWordOrNull, pauseWhenQuietMinutes, voiceAgentOrNull } from './preferences';
+import { callEngineLabel, describeMicSilent, describeVoiceError } from './voiceEngine';
 import { startTtsPlayback, writeTtsPcm, flushTtsPlayback, stopTtsPlayback } from './voiceTts';
 import { ensurePermission } from './permissionGate';
 
@@ -250,7 +244,7 @@ export function startVoiceCall(
   });
   useVoiceStore.getState().setCallMode(mode);
   useVoiceStore.getState().setCallAddressWord(addressWordOrNull());
-  useVoiceStore.getState().setCallEngine(callEngineLabel(voiceConfigOrNull(), mode));
+  useVoiceStore.getState().setCallEngine(callEngineLabel(voiceAgentOrNull()));
   // Diagnostic (logcat ReactNativeJS) — proves the tap handler fired and the
   // call bar mounted synchronously in CONNECTING state.
   console.log(`[patch-voice] startVoiceCall chatId=${chatId} bar=connecting`);
@@ -699,16 +693,6 @@ export function setCallMode(next: AudioSessionMode): void {
   const store = useVoiceStore.getState();
   if (!store.activeSession) return;
   if (store.callMode === next) return;
-  // The two modes can be configured onto different engines (say, call on
-  // Gemini Live, hands-free on local). One session runs one engine, so that
-  // switch is a fresh session on the same chat — never the old engine carrying
-  // on under the new mode's name.
-  if (modeSwitchNeedsNewSession(voiceConfigOrNull(), store.callMode, next)) {
-    const chatId = store.activeSession.chatId;
-    console.log(`[patch-voice] mode ${store.callMode} → ${next} crosses engines: new session`);
-    void endVoiceCall().then(() => startVoiceCall(chatId, next));
-    return;
-  }
   store.setCallMode(next);
   heardSomething();
   void updateVoiceAudioService(store.activeSession.chatId, serviceState({ mode: next })).catch(

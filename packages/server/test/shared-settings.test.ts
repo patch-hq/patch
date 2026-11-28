@@ -183,30 +183,6 @@ describe('SharedSettingsService', () => {
     expect('stalledThresholdMinutes' in loaded).toBe(false);
   });
 
-  it('a call or hands-free saved on host speech becomes the default voice agent; a device keeps it', () => {
-    const local = { backend: 'local', layer: 'direct', handoff: 'auto' };
-    writeFileSync(
-      join(dir, 'settings.json'),
-      JSON.stringify({
-        voiceConfig: {
-          ...DEFAULT_SHARED_SETTINGS.voiceConfig,
-          device: local,
-          handsFree: local,
-          call: { backend: 'openai', layer: 'heavy', handoff: 'never' },
-        },
-      }),
-    );
-    const vc = make().current().voiceConfig;
-    expect(vc.device).toEqual(local);
-    expect(vc.handsFree).toEqual({ backend: 'gemini', layer: 'light', handoff: 'auto' });
-    expect(vc.call).toEqual({ backend: 'openai', layer: 'heavy', handoff: 'never' });
-    expect(() =>
-      service.update({
-        voiceConfig: { ...vc, call: local as never },
-      }),
-    ).toThrow();
-  });
-
   it('gives every deployment a stable public name from its generated identity key', () => {
     const first = service.current().agentIdentity.name;
     expect(make().current().agentIdentity.name).toBe(first);
@@ -401,6 +377,21 @@ describe('SharedSettingsService', () => {
     ]);
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ localModelBaseUrl: '' }));
     expect(make().current().modelEndpoints).toBeUndefined();
+  });
+
+  it('a file with settings the schema no longer has stops the server, naming them — nothing is rewritten', () => {
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({
+        voiceConfig: {
+          ...DEFAULT_SHARED_SETTINGS.voiceConfig,
+          call: { backend: 'local', layer: 'direct', handoff: 'auto' },
+        },
+        geminiVoice: 'Kore',
+      }),
+    );
+    expect(() => make()).toThrow(/geminiVoice/);
+    expect(() => make()).toThrow(/call/);
   });
 
   it('merges two hosts’ accounts, dropping a second copy of the same Claude account', () => {

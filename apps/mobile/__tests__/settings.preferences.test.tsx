@@ -12,13 +12,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act } from 'react-test-renderer';
 import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import {
-  KOKORO_VOICES,
   ManagerPage,
   DictationPage,
   MeetingsPage,
   VoicePage,
   writePreferences,
 } from '../src/components/settings/PreferenceSections';
+import { KOKORO_VOICES } from '../src/components/settings/VoiceDeviceAnswer';
+import { snap } from '../src/components/settings/VoiceAgentSection';
+import { DEFAULT_VOICE_AGENT, VOICE_AGENT_ENGINES, type VoiceCatalog } from '@patch/wire/audio';
 import {
   renderRN as renderBase,
   findHost,
@@ -180,98 +182,216 @@ const DEVICES = [
   },
 ] as never;
 
-describe('Voice: the voice agent, and how a voice device answers', () => {
-  it('a call is a voice agent call: Gemini by default, with no Local choice', () => {
-    seedSettings();
-    const r = renderRN(<VoicePage />);
-    expect(
-      findHost(r.root, byTestId('voice-engine-gemini')).props.accessibilityState.selected,
-    ).toBe(true);
-    expect(queryHost(r.root, byTestId('voice-engine-local'))).toBeNull();
-    // A voice device answers directly by default, with the host's reply voice under it.
-    expect(
-      findHost(r.root, byTestId('voice-device-answer-direct')).props.accessibilityState.selected,
-    ).toBe(true);
-    expect(findHost(r.root, byTestId('voice-local-tts'))).toBeTruthy();
-    expect(findHost(r.root, byTestId('kokoro-voice'))).toBeTruthy();
+const CATALOG: VoiceCatalog = {
+  gemini: {
+    at: 1,
+    models: [
+      {
+        id: 'models/gemini-2.5-flash-native-audio-preview-12-2025',
+        label: 'Gemini 2.5 Flash Native Audio',
+      },
+      { id: 'models/gemini-3.8-live', label: 'Gemini 3.8 Live' },
+    ],
+    voices: [
+      { id: 'Puck', label: 'Puck' },
+      { id: 'Kore', label: 'Kore' },
+    ],
+  },
+  elevenlabs: {
+    at: 1,
+    models: [{ id: 'claude-haiku-4-5', label: 'claude-haiku-4-5' }],
+    voices: [{ id: 'v-rachel', label: 'Rachel' }],
+    speechModels: [{ id: 'eleven_v3_conversational', label: 'Eleven v3 conversational' }],
+  },
+};
+
+function withAgent(agent: typeof DEFAULT_VOICE_AGENT): void {
+  seedSettings({ preferences: { ...settingsFixture().preferences, voiceAgent: agent } });
+}
+
+describe('Voice calls: the voice agent', () => {
+  beforeEach(() => {
+    reportHost('home', {
+      hostName: 'laptop',
+      runsManager: true,
+      voiceKeys: { gemini: true, openai: false, elevenlabs: true },
+      voiceCatalog: CATALOG,
+    });
   });
 
-  it('a provider choice is written to calls and hands-free; a device answered directly keeps host speech', async () => {
+  it('offers the three providers, no Local, and writes only the provider', async () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
+    expect(queryHost(r.root, byTestId('voice-agent-provider-local'))).toBeNull();
+    expect(
+      findHost(r.root, byTestId('voice-agent-provider-gemini')).props.accessibilityState.selected,
+    ).toBe(true);
     await actAsync(async () => {
-      findHost(r.root, byTestId('voice-engine-openai')).props.onPress();
+      findHost(r.root, byTestId('voice-agent-provider-elevenlabs')).props.onPress();
       await flush();
     });
-    const cell = { backend: 'openai', layer: 'light', handoff: 'auto' };
     expect(api.setPreferences).toHaveBeenCalledWith({
-      voiceConfig: expect.objectContaining({
-        call: cell,
-        handsFree: cell,
-        device: { backend: 'local', layer: 'direct', handoff: 'auto' },
-      }),
+      voiceAgent: { ...DEFAULT_VOICE_AGENT, provider: 'elevenlabs' },
     });
   });
 
-  it('a voice device answered by the voice agent takes the voice agent setup', async () => {
+  it('lists the models a host read and reveals Voice, then How it sounds', async () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
-    await actAsync(async () => {
-      findHost(r.root, byTestId('voice-device-answer-agent')).props.onPress();
-      await flush();
-    });
-    expect(api.setPreferences).toHaveBeenCalledWith({
-      voiceConfig: expect.objectContaining({
-        device: { backend: 'gemini', layer: 'light', handoff: 'auto' },
-      }),
-    });
-  });
-
-  it('a hosted provider shows its model, its own voices, and the hand-off switch', async () => {
-    seedSettings({
-      preferences: {
-        ...settingsFixture().preferences,
-        voiceConfig: {
-          ...settingsFixture().preferences.voiceConfig,
-          call: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+    expect(textOf(findHost(r.root, byTestId('voice-agent-model-status')))).toBe('2 models');
+    expect(queryHost(r.root, byTestId('voice-agent-sound'))).toBeNull();
+    await pick(r, 'voice-agent-voice', 'Kore');
+    expect(api.setPreferences).toHaveBeenLastCalledWith({
+      voiceAgent: {
+        ...DEFAULT_VOICE_AGENT,
+        setups: {
+          ...DEFAULT_VOICE_AGENT.setups,
+          gemini: { ...DEFAULT_VOICE_AGENT.setups.gemini, voice: 'Kore' },
         },
       },
     });
+  });
+
+  it('draws only the provider’s own controls, from its description, with the calm defaults', () => {
+    withAgent({
+      provider: 'elevenlabs',
+      setups: {
+        ...DEFAULT_VOICE_AGENT.setups,
+        elevenlabs: { model: 'claude-haiku-4-5', voice: 'v-rachel', sound: {} },
+      },
+    });
     const r = renderRN(<VoicePage />);
-    expect(textOf(findHost(r.root, byTestId('voice-model')))).toMatch(/Flash.*Thinking/);
-    expect(textOf(findHost(r.root, byTestId('voice-gemini-voice')))).toBe('Provider default');
-    const toggle = findHost(r.root, byTestId('voice-handoff'));
-    expect(toggle.props.value).toBe(true);
+    expect(findHost(r.root, byTestId('voice-agent-sound'))).toBeTruthy();
+    for (const c of VOICE_AGENT_ENGINES.elevenlabs.controls) {
+      expect(
+        queryHost(
+          r.root,
+          byTestId(
+            c.kind === 'slider' || c.kind === 'choice' || c.kind === 'list'
+              ? `voice-agent-${c.key}-row`
+              : c.kind === 'tone'
+                ? 'voice-agent-tone-row'
+                : `voice-agent-${c.key}`,
+          ),
+        ),
+      ).not.toBeNull();
+    }
+    expect(queryHost(r.root, byTestId('voice-agent-matchTone'))).toBeNull();
+    expect(textOf(findHost(r.root, byTestId('voice-agent-stability-value')))).toBe('0.7');
+    expect(textOf(findHost(r.root, byTestId('voice-agent-speed-value')))).toBe('0.95×');
+    expect(
+      findHost(r.root, byTestId('voice-agent-eagerness-patient')).props.accessibilityState.selected,
+    ).toBe(true);
+  });
+
+  it('a slider step writes the snapped value into the provider setup', async () => {
+    withAgent({
+      provider: 'elevenlabs',
+      setups: {
+        ...DEFAULT_VOICE_AGENT.setups,
+        elevenlabs: { model: 'claude-haiku-4-5', voice: 'v-rachel', sound: {} },
+      },
+    });
+    const r = renderRN(<VoicePage />);
     await actAsync(async () => {
-      toggle.props.onValueChange(false);
+      findHost(r.root, byTestId('voice-agent-stability')).props.onAccessibilityAction({
+        nativeEvent: { actionName: 'increment' },
+      });
       await flush();
     });
     expect(api.setPreferences).toHaveBeenLastCalledWith({
-      voiceConfig: expect.objectContaining({
-        call: { backend: 'gemini', layer: 'light', handoff: 'never' },
+      voiceAgent: expect.objectContaining({
+        setups: expect.objectContaining({
+          elevenlabs: { model: 'claude-haiku-4-5', voice: 'v-rachel', sound: { stability: 0.75 } },
+        }),
       }),
     });
-    expect(queryHost(r.root, byTestId('voice-handoff-always'))).toBeNull();
-    await pick(r, 'voice-gemini-voice', 'Kore');
-    expect(api.setPreferences).toHaveBeenLastCalledWith({ geminiVoice: 'Kore' });
   });
 
-  it('a failed write is reported, and frees the chips', async () => {
+  it('snap keeps a slider on its steps and inside its bounds', () => {
+    const speed = VOICE_AGENT_ENGINES.openai.controls.find((c) => c.key === 'speed');
+    if (speed?.kind !== 'slider') throw new Error('openai speed is a slider');
+    expect(snap(speed, 0.97)).toBe(0.95);
+    expect(snap(speed, 9)).toBe(1.5);
+    expect(snap(speed, 0)).toBe(0.25);
+  });
+
+  it('tone is kept per voice and saved when the field loses focus', async () => {
+    withAgent({
+      provider: 'gemini',
+      setups: {
+        ...DEFAULT_VOICE_AGENT.setups,
+        gemini: { model: 'models/gemini-3.8-live', voice: 'Kore', sound: {} },
+      },
+    });
+    const r = renderRN(<VoicePage />);
+    const tone = findHost(r.root, byTestId('voice-agent-tone'));
+    await actAsync(async () => tone.props.onChangeText('Calm. [slow] when explaining.'));
+    expect(api.setPreferences).not.toHaveBeenCalled();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('voice-agent-tone')).props.onBlur();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({
+      voiceTones: { 'gemini:Kore': 'Calm. [slow] when explaining.' },
+    });
+  });
+
+  it('Refresh asks each online host with the key to read again', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    await actAsync(async () =>
+      findHost(r.root, byTestId('voice-agent-model-refresh')).props.onPress(),
+    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'host.voice_catalog_refresh',
+      hostId: 'home',
+      provider: 'gemini',
+    });
+  });
+
+  it('a failed write is reported', async () => {
     vi.mocked(api.setPreferences).mockRejectedValue(new Error('nope'));
     seedSettings();
     const r = renderRN(<VoicePage />);
     await actAsync(async () => {
-      findHost(r.root, byTestId('voice-engine-openai')).props.onPress();
+      findHost(r.root, byTestId('voice-agent-provider-openai')).props.onPress();
       await flush();
     });
-    expect(__getLastAlert()?.title).toBe('Settings failed');
-    expect(__getLastAlert()?.message).toBe('nope');
-    expect(findHost(r.root, byTestId('voice-engine-gemini')).props.accessibilityState).toEqual({
-      selected: true,
-      disabled: false,
+    expect(__getLastAlert()?.message).toContain('nope');
+  });
+});
+
+describe('Voice calls: agents calling you and calls', () => {
+  it('Answer automatically shows only while agents can call; both write', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    expect(findHost(r.root, byTestId('agent-call-auto-answer'))).toBeTruthy();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('agents-can-call')).props.onValueChange(false);
+      await flush();
     });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({ agentsCanCall: false });
+    seedSettings({ preferences: { ...settingsFixture().preferences, agentsCanCall: false } });
+    const off = renderRN(<VoicePage />);
+    expect(queryHost(off.root, byTestId('agent-call-auto-answer'))).toBeNull();
   });
 
+  it('Pause when quiet for: Off by default, writes minutes', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    expect(findHost(r.root, byTestId('pause-when-quiet-0')).props.accessibilityState.selected).toBe(
+      true,
+    );
+    await actAsync(async () => {
+      findHost(r.root, byTestId('pause-when-quiet-5')).props.onPress();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({ pauseWhenQuietMinutes: 5 });
+  });
+});
+
+describe('Voice calls: key status', () => {
   it('a hosted provider and a device’s dictation name each host with no key for it', () => {
     reportHost('hetzner', {
       hostName: 'hetzner',
@@ -290,10 +410,8 @@ describe('Voice: the voice agent, and how a voice device answers', () => {
         voiceConfig: {
           ...base.voiceConfig,
           dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
-          device: { backend: 'openai', layer: 'light', handoff: 'auto' },
-          handsFree: { backend: 'openai', layer: 'light', handoff: 'auto' },
-          call: { backend: 'openai', layer: 'light', handoff: 'auto' },
         },
+        voiceAgent: { ...DEFAULT_VOICE_AGENT, provider: 'openai' },
       },
     });
     const r = renderRN(
@@ -584,7 +702,7 @@ describe('Manager page', () => {
   });
 });
 
-describe('Voice page: Local calls (nested under Local)', () => {
+describe('Voice devices answering directly (speech on the host)', () => {
   it('a Kokoro voice writes the shared setting, and there is no chat title setting', async () => {
     seedSettings({
       preferences: { ...settingsFixture().preferences, kokoroVoice: 'af_heart' },
@@ -706,7 +824,9 @@ describe('Voice page: frame', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Voice');
-    expect(findHost(r.root, byTestId('settings-voice-config'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('settings-voice-agent'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('settings-agents-calling'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('settings-calls'))).toBeTruthy();
     expect(queryHost(r.root, byTestId('settings-voice-speaking'))).toBeNull();
     expect(findHost(r.root, byTestId('settings-voice-devices'))).toBeTruthy();
     expect(queryHost(r.root, byTestId('settings-voice-dictation'))).toBeNull();
@@ -731,9 +851,9 @@ describe('Voice page: frame', () => {
     expect(findHost(r.root, byTestId('settings-voice-devices'))).toBeTruthy();
   });
 
-  it('the engine waits for settings to load', () => {
+  it('the voice agent waits for settings to load', () => {
     const r = renderRN(<VoicePage />);
-    expect(findHost(r.root, byTestId('voice-config-loading'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('voice-agent-loading'))).toBeTruthy();
     expect(queryHost(r.root, byTestId('voice-dictation-backend-local'))).toBeNull();
   });
 });

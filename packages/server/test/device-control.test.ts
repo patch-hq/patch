@@ -90,6 +90,7 @@ describe('voice device control on the server', () => {
     await app.listen({ port: 0, host: '127.0.0.1' });
     hostLink.emit({
       type: 'host.host',
+      voiceCatalog: {},
       hostId: HOST_ID,
       hostName: 'Netcup',
       platform: 'linux',

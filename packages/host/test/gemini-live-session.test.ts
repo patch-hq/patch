@@ -11,15 +11,13 @@ import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import {
   GeminiLiveSession,
   DEFAULT_GEMINI_LIVE_MODEL,
-  DEFAULT_GEMINI_LIVE_HEAVY_MODEL,
-  geminiLiveModelFor,
   type GeminiLiveDeps,
 } from '../src/audio/gemini-live.js';
 import { MockVad } from '../src/audio/vad.js';
 import type { SessionInit } from '../src/audio/session.js';
 import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
 import { fakeVoiceAgentLink, FAKE_START_CONTEXT } from './helpers/fakeVoiceAgentLink.js';
-import type { AudioEvent } from '@patch/wire/audio';
+import { soundConfig, VOICE_AGENT_ENGINES, type AudioEvent } from '@patch/wire/audio';
 
 const logger = pino({ level: 'silent' });
 
@@ -214,6 +212,39 @@ describe('GeminiLiveSession — connect + setup', () => {
     const ws2 = await openSession(new GeminiLiveSession(makeInit(), plain.deps), plain.lastWs);
     const [setup2] = ws2.sentJson() as [{ setup: { generationConfig: Record<string, unknown> } }];
     expect(setup2.setup.generationConfig.speechConfig).toBeUndefined();
+  });
+
+  test('match my tone: affective dialog in the setup, on the v1alpha API; the tone in the instructions', async () => {
+    const { deps, lastWs } = makeDeps({
+      tone: 'Calm and sincere.',
+      soundConfig: soundConfig(
+        VOICE_AGENT_ENGINES.gemini,
+        { matchTone: true },
+        'Calm and sincere.',
+      ),
+    });
+    const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
+    expect(ws.url).toContain('.v1alpha.GenerativeService');
+    const [setup] = ws.sentJson() as [
+      {
+        setup: {
+          generationConfig: Record<string, unknown>;
+          systemInstruction: { parts: [{ text: string }] };
+        };
+      },
+    ];
+    expect(setup.setup.generationConfig['enableAffectiveDialog']).toBe(true);
+    expect(setup.setup.systemInstruction.parts[0].text).toContain('Calm and sincere.');
+  });
+
+  test('match my tone off: v1beta, and the field is not sent', async () => {
+    const { deps, lastWs } = makeDeps({
+      soundConfig: soundConfig(VOICE_AGENT_ENGINES.gemini, {}, undefined),
+    });
+    const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
+    expect(ws.url).toContain('.v1beta.GenerativeService');
+    const [setup] = ws.sentJson() as [{ setup: { generationConfig: Record<string, unknown> } }];
+    expect('enableAffectiveDialog' in setup.setup.generationConfig).toBe(false);
   });
 
   test('the instructions are the voice instructions, then the chat as it stands — nothing else', async () => {
@@ -780,16 +811,6 @@ describe('GeminiLiveSession — mode/focus passthrough + scope cuts', () => {
     ws.emit('close', 1000, '');
     expect(onFatal).not.toHaveBeenCalled();
     expect(audioEvents.some((e) => e.type === 'audio.error')).toBe(false);
-  });
-});
-
-describe('geminiLiveModelFor', () => {
-  test('heavy runs the extended-thinking Live model; light and direct the default', () => {
-    expect(geminiLiveModelFor('heavy')).toBe(DEFAULT_GEMINI_LIVE_HEAVY_MODEL);
-    expect(geminiLiveModelFor('light')).toBe(DEFAULT_GEMINI_LIVE_MODEL);
-    expect(geminiLiveModelFor('direct')).toBe(DEFAULT_GEMINI_LIVE_MODEL);
-    expect(geminiLiveModelFor('heavy', { heavy: 'h' })).toBe('h');
-    expect(geminiLiveModelFor('light', { light: 'l' })).toBe('l');
   });
 });
 

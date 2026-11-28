@@ -384,14 +384,18 @@ import {
 } from './audio/vad.js';
 import { clipHasSpeech } from './meetingSpeechGate.js';
 import {
+  DEFAULT_VOICE_AGENT,
   DEFAULT_VOICE_CONFIG,
   voiceKeyMissingMessage,
   voiceSurfacesMissingKey,
   dictationEngineFor,
   type DictationEngine,
+  type VoiceAgentSetting,
   type VoiceConfig,
   type VoiceKeys,
+  type VoiceTones,
 } from '@patch/wire/audio';
+import { VoiceCatalogStore } from './audio/voiceCatalog.js';
 import type { FastifyInstance } from 'fastify';
 
 /**
@@ -443,6 +447,10 @@ export interface MainTestHooks {
   claudeRetryDelaysMs?: number[];
   /** Where the host's log lines go instead of stdout — lets a test read what boot logged. */
   logStream?: import('pino').DestinationStream;
+  /** Replaces the socket to Gemini Live, so a test can play the model without a network. */
+  geminiWsCtor?: new (url: string) => import('ws').WebSocket;
+  /** Replaces the network for the voice agent catalog's reads (voiceCatalog.ts). */
+  voiceCatalogFetch?: import('./audio/voiceCatalog.js').CatalogFetch;
 }
 
 /**
@@ -969,22 +977,25 @@ async function startHost(
   let elevenLabsVoice: string | undefined = persistedHostState.elevenLabsVoice;
   /** The ElevenLabs speech model (`host.settings` → `elevenLabsModel`); absent keeps the per-purpose defaults. */
   let elevenLabsModel: ElevenLabsTtsModel | undefined = persistedHostState.elevenLabsModel;
-  /** The voices hosted calls speak in, and each device's dictation engine (shared settings; not persisted — they arrive with the settings on connect). */
-  let geminiVoice: string | undefined;
+  /**
+   * The voice agent setup and tones (spec/07 § The voice agent), and each
+   * device's dictation engine — shared settings, not persisted: they arrive
+   * with the settings on connect.
+   */
+  let voiceAgent: VoiceAgentSetting = DEFAULT_VOICE_AGENT;
+  let voiceTones: VoiceTones = {};
   /** The ElevenLabs plan's credits as last read (after each ElevenLabs call, and when the voice list is read). */
   let elevenLabsPlan: PlanCredits | undefined;
-  let openaiVoice: string | undefined;
   let deviceDictation: Record<string, DictationEngine> | undefined;
   /** The account's ElevenLabs voices, or why they could not be listed. */
   let elevenLabsVoices: ElevenLabsVoice[] | undefined;
   let elevenLabsVoicesError: string | undefined;
   /**
-   * Account's per-surface voice config (`host.settings` → `voiceConfig`,
-   * spec/07 § Voice — a config matrix). Independently selects the STT/TTS/
-   * agent engine and, for the three conversational surfaces, the front-layer
-   * shape, for each of dictation / device / hands-free / call.
+   * The account's voice config (shared settings → `voiceConfig`, spec/07):
+   * speech to text, dictation, meetings and how voice devices answer. Not
+   * persisted — it arrives with the settings on connect.
    */
-  let voiceConfig: VoiceConfig = persistedHostState.voiceConfig ?? DEFAULT_VOICE_CONFIG;
+  let voiceConfig: VoiceConfig = DEFAULT_VOICE_CONFIG;
   // Which provider keys this host holds. A surface configured onto a provider
   // whose key is missing does NOT stop the host — voice is one setting, and
   // every chat on this host would go down with it. Instead its sessions are
@@ -1000,7 +1011,18 @@ async function startHost(
     deepgram: providerKeys.has('deepgram'),
     assemblyai: providerKeys.has('assemblyai'),
   });
-  logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
+  logVoiceKeysMissing(logger, voiceConfig, voiceAgent, voiceKeys());
+  // spec/07 § The voice agent — each provider's models and voices, read with
+  // this host's key for Settings → Voice calls; again on a key change and on
+  // Refresh (`host.voice_catalog_refresh`). Its reads finish asynchronously,
+  // so `publishHost` is defined by the time it is called.
+  const voiceCatalog = new VoiceCatalogStore({
+    ...(testHooks?.voiceCatalogFetch ? { fetchImpl: testHooks.voiceCatalogFetch } : {}),
+    key: (provider) => providerKeys.get(provider),
+    onChange: () => publishHost(),
+    onError: (provider, message) =>
+      logger.error({ provider, err: message }, 'voice agent: could not read the provider catalog'),
+  });
   // spec/07 § Call cost — every costed call, and this host's totals.
   const voiceLedger = createVoiceLedger(join(config.patchHome, 'voice-usage.jsonl'));
   /**
@@ -1583,6 +1605,7 @@ async function startHost(
       ...(elevenLabsVoices !== undefined ? { elevenLabsVoices } : {}),
       ...(elevenLabsVoicesError !== undefined ? { elevenLabsVoicesError } : {}),
       voiceKeys: voiceKeys(),
+      voiceCatalog: voiceCatalog.snapshot(),
       voiceUsage: {
         ...voiceLedger.totals(Date.now()),
         ...(elevenLabsPlan !== undefined
@@ -1822,9 +1845,12 @@ async function startHost(
       })
       .finally(publishHost);
   };
+  // The voice agent catalog's first read; again on a key change below.
+  void voiceCatalog.refreshAll();
   providerKeys.onChange(() => {
-    logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
+    logVoiceKeysMissing(logger, voiceConfig, voiceAgent, voiceKeys());
     publishHost();
+    void voiceCatalog.refreshAll();
     refreshElevenLabsVoices();
     onSpeechKeysChanged();
   });
@@ -2405,9 +2431,8 @@ async function startHost(
     agentsCanCall = shared.agentsCanCall;
     if (JSON.stringify(shared.voiceConfig) !== JSON.stringify(voiceConfig)) {
       voiceConfig = shared.voiceConfig;
-      hostStateStore.update({ voiceConfig });
       logger.info({ voiceConfig }, 'voice config changed');
-      logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
+      logVoiceKeysMissing(logger, voiceConfig, voiceAgent, voiceKeys());
     }
     if (shared.kokoroVoice !== undefined && shared.kokoroVoice !== kokoroVoice) {
       kokoroVoice = shared.kokoroVoice;
@@ -2430,11 +2455,12 @@ async function startHost(
       hostStateStore.update({ elevenLabsModel });
       logger.info({ elevenLabsModel }, 'elevenlabs model changed');
     }
-    if (shared.geminiVoice !== geminiVoice || shared.openaiVoice !== openaiVoice) {
-      geminiVoice = shared.geminiVoice;
-      openaiVoice = shared.openaiVoice;
-      logger.info({ geminiVoice, openaiVoice }, 'hosted call voices changed');
+    if (JSON.stringify(shared.voiceAgent) !== JSON.stringify(voiceAgent)) {
+      voiceAgent = shared.voiceAgent;
+      logger.info({ voiceAgent }, 'voice agent setup changed');
+      logVoiceKeysMissing(logger, voiceConfig, voiceAgent, voiceKeys());
     }
+    voiceTones = shared.voiceTones;
     if (JSON.stringify(shared.deviceDictation) !== JSON.stringify(deviceDictation)) {
       deviceDictation = shared.deviceDictation;
       logger.info({ deviceDictation }, 'per-device dictation engines changed');
@@ -2895,7 +2921,6 @@ async function startHost(
             ...(state.permissionModeDefault
               ? { permissionModeDefault: state.permissionModeDefault }
               : {}),
-            ...(state.voiceConfig ? { voiceConfig: state.voiceConfig } : {}),
             ...(state.kokoroVoice ? { kokoroVoice: state.kokoroVoice } : {}),
             ...(state.ttsBackend ? { ttsBackend: state.ttsBackend } : {}),
             ...(state.elevenLabsVoice ? { elevenLabsVoice: state.elevenLabsVoice } : {}),
@@ -3777,6 +3802,13 @@ async function startHost(
         });
         return;
       }
+      if (event.type === 'host.voice_catalog_refresh') {
+        if (!isForThisHost(event.hostId, event.type)) return;
+        // Answered by the `host.host` the read publishes; a failed read is
+        // reported there with its reason.
+        void voiceCatalog.refresh(event.provider);
+        return;
+      }
       if (event.type === 'patch.diag.voice_inject') {
         // DEV/TEST (spec/07): feed a transcribed utterance into the open voice
         // session for this surface, routed to its current focus chat. Proves
@@ -4558,6 +4590,8 @@ async function startHost(
       lastAgentMessage: (chatId) => daemon.lastAgentMessage(chatId),
       chatActivity: (chatId) => daemon.chatActivity(chatId),
       searchChat: (chatId, query) => daemon.searchChat(chatId, query),
+      getPendingPermissionForChat: (chatId) => daemon.getPendingPermissionForChat(chatId),
+      submitPermissionResponse: (r) => daemon.submitPermissionResponse(r),
     },
     sessionsOnChat: (chatId) => audioServer?.sessionsOnChat(chatId) ?? [],
     sessionById: (sessionId) => audioServer?.sessionById(sessionId),
@@ -7130,6 +7164,7 @@ async function startHost(
           : (): Vad => new MockVad();
 
   audioServer = await startAudioServer({
+    ...(testHooks?.geminiWsCtor ? { geminiWsCtor: testHooks.geminiWsCtor } : {}),
     host: config.audio.host,
     port: config.audio.port,
     logger: logger.child({ component: 'audio' }),
@@ -7217,34 +7252,16 @@ async function startHost(
     // spec/07 § Voice — live read, same pattern as getKokoroVoice above.
     getVoiceConfig: () => voiceConfig,
     resolveSpeechToText: sttEngineResolver,
-    getHostedVoices: () => ({
-      ...(geminiVoice !== undefined ? { gemini: geminiVoice } : {}),
-      ...(openaiVoice !== undefined ? { openai: openaiVoice } : {}),
-      ...(elevenLabsVoice !== undefined ? { elevenlabs: elevenLabsVoice } : {}),
-    }),
+    getVoiceAgent: () => voiceAgent,
+    getVoiceTones: () => voiceTones,
+    getVoiceCatalog: (provider) => voiceCatalog.entry(provider),
     getDeviceDictation: () => deviceDictation,
     geminiApiKey: () => providerKeys.get('gemini'),
     deepgramApiKey: () => providerKeys.get('deepgram'),
     elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
     ...(liveRecognizer ? { liveRecognizer } : {}),
-    ...(config.audio.geminiLiveModel ? { geminiLiveModel: config.audio.geminiLiveModel } : {}),
-    ...(config.audio.geminiLiveModelHeavy
-      ? { geminiLiveModelHeavy: config.audio.geminiLiveModelHeavy }
-      : {}),
     openaiApiKey: () => providerKeys.get('openai'),
     elevenLabsApiKey: () => providerKeys.get('elevenlabs'),
-    ...(config.audio.elevenLabsAgentLlmLight
-      ? { elevenLabsAgentLlmLight: config.audio.elevenLabsAgentLlmLight }
-      : {}),
-    ...(config.audio.elevenLabsAgentLlmHeavy
-      ? { elevenLabsAgentLlmHeavy: config.audio.elevenLabsAgentLlmHeavy }
-      : {}),
-    ...(config.audio.openaiRealtimeModelLight
-      ? { openaiRealtimeModelLight: config.audio.openaiRealtimeModelLight }
-      : {}),
-    ...(config.audio.openaiRealtimeModelHeavy
-      ? { openaiRealtimeModelHeavy: config.audio.openaiRealtimeModelHeavy }
-      : {}),
     // spec/07 § The voice agent and the chat's agent — the voice agent's tools the host
     // answers and the chat's start context, the same for every provider.
     voiceAgentLink: chatVoice.link,
@@ -7852,8 +7869,13 @@ export function handleAttachmentDelete(
  * host does not hold. Logged, never thrown: the host keeps serving every
  * chat, and the surface itself is refused per session with the same sentence.
  */
-export function logVoiceKeysMissing(logger: Logger, config: VoiceConfig, keys: VoiceKeys): void {
-  for (const { surface, backend, env } of voiceSurfacesMissingKey(config, keys)) {
+export function logVoiceKeysMissing(
+  logger: Logger,
+  config: VoiceConfig,
+  agent: VoiceAgentSetting,
+  keys: VoiceKeys,
+): void {
+  for (const { surface, backend, env } of voiceSurfacesMissingKey(config, agent, keys)) {
     logger.error(
       { surface, backend, missingKey: env },
       `voice: ${voiceKeyMissingMessage(surface, backend)} Its sessions will be refused.`,

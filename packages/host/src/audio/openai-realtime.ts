@@ -10,11 +10,8 @@
 // The model IS the voice agent and passes work to the chat's agent with the
 // voice agent's tools (voiceAgent.ts); everything about the chat — the start
 // context, the tools the host answers, the answers pushed back in — is the
-// shared VoiceAgentCall, the same as on the other providers. `layer` picks the model: `light` → the mini realtime model,
-// `heavy` → the flagship (`DEFAULT_OPENAI_REALTIME_MODELS`, overridable per
-// host). `direct` has no meaning on a hosted backend — the hosted model always
-// fronts Manager — and runs as `light` (the same rule the Gemini tier has
-// always applied; Settings says so).
+// shared VoiceAgentCall, the same as on the other providers. The model, voice
+// and sound are the account's voice agent setup (Settings → Voice calls).
 //
 // Protocol: the GA Realtime API over WebSocket
 // (developers.openai.com/api/docs/guides/realtime-websocket, checked
@@ -55,8 +52,8 @@
 
 import type { Logger } from 'pino';
 import { WebSocket as WsImpl, type WebSocket as WsSocket } from 'ws';
-import type { AudioEvent, AudioSessionMode, VoiceHandoff, VoiceLayer } from '@patch/wire/audio';
-import { modeRequiresAddress } from '@patch/wire/audio';
+import type { AudioEvent, AudioSessionMode, VoiceHandoff } from '@patch/wire/audio';
+import { mergeConfig, modeRequiresAddress } from '@patch/wire/audio';
 import { identifyVoice, type VoiceProfile } from '@patch/wire';
 import {
   HANDOFF_REFUSED,
@@ -106,24 +103,9 @@ import {
   type ManagerVoiceTools,
 } from './managerVoice.js';
 
-/** Realtime models per layer, as documented 2026-09-24 (developers.openai.com/api/docs/models). */
-export const DEFAULT_OPENAI_REALTIME_MODELS = {
-  light: 'gpt-realtime-2.1-mini',
-  heavy: 'gpt-realtime-2.1',
-} as const;
-
 /** Input transcription model the Realtime session uses to show the user's words. */
 export const DEFAULT_OPENAI_REALTIME_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
 export const DEFAULT_OPENAI_REALTIME_VOICE = 'marin';
-
-/** The model a hosted layer runs. `direct` has no hosted meaning and runs as `light`. */
-export function openaiRealtimeModelFor(
-  layer: VoiceLayer,
-  overrides: { light?: string | undefined; heavy?: string | undefined } = {},
-): string {
-  if (layer === 'heavy') return overrides.heavy ?? DEFAULT_OPENAI_REALTIME_MODELS.heavy;
-  return overrides.light ?? DEFAULT_OPENAI_REALTIME_MODELS.light;
-}
 
 function realtimeUrl(model: string): string {
   return `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
@@ -143,9 +125,11 @@ export interface OpenAIRealtimeDeps {
   instructions: string;
   /** How the voice sounds, as the user wrote it; goes in the instructions after them. */
   tone?: string;
+  /** How it sounds, as `session` fields (`soundConfig` of the OpenAI engine description). */
+  soundConfig?: Record<string, unknown>;
   /** OPENAI_REALTIME_API_KEY. The caller refuses to construct this class without one. */
   apiKey: string;
-  /** Realtime model — resolved from the layer by the caller (`openaiRealtimeModelFor`). */
+  /** Realtime model, from the voice agent setup. */
   model: string;
   /** Who does the work (spec/07 § The fast voice and the chat's agent). Defaults to `auto`. */
   handoff?: VoiceHandoff;
@@ -450,27 +434,28 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   }
 
   private sessionConfig(): Record<string, unknown> {
-    return {
-      type: 'session.update',
-      session: {
-        type: 'realtime',
-        ...this.speakerConfig(),
-        output_modalities: ['audio'],
-        audio: {
-          input: {
-            format: { type: 'audio/pcm', rate: 24000 },
-            transcription: {
-              model: this.deps.transcribeModel ?? DEFAULT_OPENAI_REALTIME_TRANSCRIBE_MODEL,
-              language: 'en',
-            },
-            turn_detection: this.turnDetection(),
+    const session = {
+      type: 'realtime',
+      ...this.speakerConfig(),
+      output_modalities: ['audio'],
+      audio: {
+        input: {
+          format: { type: 'audio/pcm', rate: 24000 },
+          transcription: {
+            model: this.deps.transcribeModel ?? DEFAULT_OPENAI_REALTIME_TRANSCRIBE_MODEL,
+            language: 'en',
           },
-          output: {
-            format: { type: 'audio/pcm', rate: 24000 },
-            voice: this.deps.voice ?? DEFAULT_OPENAI_REALTIME_VOICE,
-          },
+          turn_detection: this.turnDetection(),
+        },
+        output: {
+          format: { type: 'audio/pcm', rate: 24000 },
+          voice: this.deps.voice ?? DEFAULT_OPENAI_REALTIME_VOICE,
         },
       },
+    };
+    return {
+      type: 'session.update',
+      session: mergeConfig(session, this.deps.soundConfig ?? {}),
     };
   }
 
@@ -912,6 +897,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       this.call.chatId,
       this.gate ? `${this.speaker?.name ?? 'Unrecognised voice'}: ${text}` : text,
     );
+    // spec/07 § Permission prompts during voice — a spoken yes / no answers a waiting permission.
+    this.deps.link.answerPermission(this.call.chatId, text);
     this.releaseHeldReply();
     if (modeRequiresAddress(this.mode)) {
       // hands-free: the server VAD was told not to answer on its own.

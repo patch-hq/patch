@@ -145,6 +145,7 @@ test.describe('jobs search', () => {
       };
       w.__presenceStore.getState().setHostReport({
         type: 'host.host',
+        voiceCatalog: {},
         hostId: 'd1',
         hostName: 'laptop',
         backends: [],

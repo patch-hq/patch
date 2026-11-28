@@ -161,8 +161,6 @@ function start(
     token: string;
     deviceId?: string;
     role?: 'voice-note' | 'voice-call' | 'voice-device-conv';
-    /** The surface cancels its own echo (barge-in is only heard then). */
-    aec?: boolean;
   },
 ): void {
   ws.send(
@@ -173,9 +171,9 @@ function start(
       surfaceId: o.surfaceId,
       surfaceKind: o.surfaceKind,
       chatId: o.chatId,
-      role: o.role ?? 'voice-device-conv',
+      role: o.role ?? 'voice-call',
       token: o.token,
-      surfaceHasAec: o.aec ?? (o.surfaceKind === 'web' || o.surfaceKind === 'mobile'),
+      surfaceHasAec: o.surfaceKind === 'web' || o.surfaceKind === 'mobile',
       ...(o.deviceId !== undefined ? { deviceId: o.deviceId } : {}),
     }),
   );
@@ -238,7 +236,7 @@ describe('TE1 voice host pipeline e2e', () => {
     server = undefined;
   });
 
-  test('E1-1: utterance lands as a USER turn in the focused chat, tagged with its voice device in the turn TEXT', async () => {
+  test('E1-1: utterance lands as a USER turn in the focused chat, tagged [voice • device:<id>] in the turn TEXT', async () => {
     const recorded: RecordedTurn[] = [];
     server = await startServer({
       recorded,
@@ -251,7 +249,8 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'acct',
       surfaceId: 'surf-web',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 'surf-web',
+      role: 'voice-device-conv',
       chatId: 'chat-A',
       token: mintToken({
         accountId: 'acct',
@@ -271,7 +270,7 @@ describe('TE1 voice host pipeline e2e', () => {
     expect(turn.chatId).toBe('chat-A');
     // The mock STT yields a deterministic transcript; the recorded text is the
     // voice prefix PREPENDED to it — ordinary turn text, not a system prompt.
-    expect(turn.text.startsWith('[voice • device:dev-test] ')).toBe(true);
+    expect(turn.text.startsWith('[voice • device:surf-web] ')).toBe(true);
     expect(turn.text).toMatch(/\[mock-transcript \d+ms\]/);
   });
 
@@ -287,12 +286,12 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'acct',
       surfaceId: 'surf-web',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 'surf-web',
+      role: 'voice-device-conv',
       chatId: 'c',
       token: mintToken({ accountId: 'acct', surfaceId: 'surf-web', sessionId: sid }),
     });
-    // The call's own "Connected." greeting also ends in a tts_end; the turn's
-    // reply is the one that follows the user's transcript.
+    // The turn's reply is the one that follows the user's transcript.
     const got = collectUntil(
       ws,
       (evs) => {
@@ -340,23 +339,21 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'acct',
       surfaceId: 'surf-web',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 'surf-web',
+      role: 'voice-device-conv',
       chatId: 'c',
-      aec: true,
       token: mintToken({ accountId: 'acct', surfaceId: 'surf-web', sessionId: sid }),
     });
-    // First utterance → reply → speech being made. A voice device is sent a
-    // reply whole, once it is made (48 kHz, resampled once), so it is
-    // interrupted while the reply is still being synthesised.
-    const firstTurn = collectUntil(
+    // First utterance → reply → speaking. A device's reply is sent whole once
+    // synthesised, so the barge-in lands while the host is still speaking it.
+    const firstTts = collectUntil(
       ws,
-      (evs) => evs.some((e) => e.type === 'audio.transcript_final'),
+      (evs) => evs.some((e) => e.type === 'audio.state' && e.state === 'speaking'),
       4000,
     );
     sendPcm(ws);
     sendPcm(ws);
-    await firstTurn;
-    await new Promise((r) => setTimeout(r, 150));
+    await firstTts;
     // Now barge in while speaking, then finish the new utterance.
     const bargeAndSecond = collectUntil(
       ws,
@@ -392,7 +389,8 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'acct',
       surfaceId,
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: surfaceId,
+      role: 'voice-device-conv',
       chatId: 'chat-A',
       token: mintToken({ accountId: 'acct', surfaceId, sessionId: sid, chatId: 'chat-A' }),
     });
@@ -438,7 +436,8 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'a',
       surfaceId: 's',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 's',
+      role: 'voice-device-conv',
       chatId: 'c',
       token: 'forged.deadbeef',
     });
@@ -454,7 +453,8 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'a',
       surfaceId: 's',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 's',
+      role: 'voice-device-conv',
       chatId: 'c',
       token: mintToken({ accountId: 'a', surfaceId: 's', sessionId: sid }),
     });
@@ -477,7 +477,8 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'a',
       surfaceId: 's',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 's',
+      role: 'voice-device-conv',
       chatId: 'c',
       token: t1,
     });
@@ -492,7 +493,8 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'a',
       surfaceId: 's',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 's',
+      role: 'voice-device-conv',
       chatId: 'c',
       token: t1,
     });
@@ -568,7 +570,8 @@ describe('TE1 voice host pipeline e2e', () => {
         accountId: 'a',
         surfaceId: `s${i}`,
         surfaceKind: 'device',
-        deviceId: 'dev-test',
+        deviceId: `s${i}`,
+        role: 'voice-device-conv',
         chatId: 'c',
         token: mintToken({ accountId: 'a', surfaceId: `s${i}`, sessionId: sid }),
       });
@@ -585,7 +588,8 @@ describe('TE1 voice host pipeline e2e', () => {
       accountId: 'a',
       surfaceId: 'sover',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 'sover',
+      role: 'voice-device-conv',
       chatId: 'c',
       token: mintToken({ accountId: 'a', surfaceId: 'sover', sessionId: 'e1-9-over' }),
     });
