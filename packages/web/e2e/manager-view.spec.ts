@@ -20,7 +20,9 @@ test.describe('Manager view', () => {
     await expect(page.getByTestId('chat-stream')).toBeVisible();
     await expect(page.getByTestId('threads-strip')).toHaveCount(0);
     await expect(page.locator('.threads-divider')).toHaveCount(0);
-    await expect(page.getByTestId('reach-switch')).toHaveCount(0);
+    // The Notify / Auto-notify reach switch is the Manager's one header control
+    // besides the gear: shown here, and on no ordinary chat (below).
+    await expect(page.getByTestId('reach-switch')).toBeVisible();
   });
 
   test('has a Manager settings gear beside Zen that opens Settings → Manager', async ({ page }) => {
@@ -41,6 +43,7 @@ test.describe('Manager view', () => {
     await page.goto(REGULAR);
     await expect(page.getByTestId('action-zen')).toBeVisible();
     await expect(page.getByTestId('action-manager-settings')).toHaveCount(0);
+    await expect(page.getByTestId('reach-switch')).toHaveCount(0);
   });
 
   test('finished chats arrive as collapsed "Finished · <name>" notes and Patch’s own line', async ({
