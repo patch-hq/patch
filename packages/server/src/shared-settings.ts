@@ -57,7 +57,6 @@ import {
   limitBehaviourFromAutoResume,
   managerWakeFromSweep,
   sweepFieldsForManagerWake,
-  DEFAULT_SWEEP_PROMPT,
   ownSettingsGroups,
   invalidOwnSettingValue,
   resolveAcpAgents,
@@ -504,8 +503,8 @@ export class SharedSettingsService {
     }
     // Finished chats replaced the sweep (spec/06 § Finished chats). A file
     // from before it gains the `managerWake` its sweep switch and interval
-    // meant, and a customised standing-instructions prompt becomes the
-    // Manager prompt so nothing written is lost.
+    // meant. The sweep prompt is not carried over: its framing (reading chats
+    // that went idle) is not what the Manager prompt is for.
     if (!('managerWake' in raw) && typeof raw['sweepEnabled'] === 'boolean') {
       Object.assign(
         raw,
@@ -514,14 +513,6 @@ export class SharedSettingsService {
           typeof raw['sweepIntervalMinutes'] === 'number' ? raw['sweepIntervalMinutes'] : 30,
         ),
       );
-    }
-    if (
-      !('managerPrompt' in raw) &&
-      typeof raw['sweepPrompt'] === 'string' &&
-      raw['sweepPrompt'].trim() !== '' &&
-      raw['sweepPrompt'] !== DEFAULT_SWEEP_PROMPT
-    ) {
-      raw['managerPrompt'] = raw['sweepPrompt'];
     }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {

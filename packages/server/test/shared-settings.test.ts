@@ -190,18 +190,12 @@ describe('SharedSettingsService', () => {
     expect(load({ sweepEnabled: true, managerWake: 'off' }).managerWake).toBe('off');
   });
 
-  it('the Manager prompt: the default, or a customised sweep prompt carried over once', () => {
+  it('the Manager prompt: the default, never carried over from the sweep prompt', () => {
     expect(service.current().managerPrompt).toBe(DEFAULT_MANAGER_PROMPT);
-    writeFileSync(
-      join(dir, 'settings.json'),
-      JSON.stringify({ sweepPrompt: DEFAULT_SHARED_SETTINGS.sweepPrompt }),
-    );
-    expect(make().current().managerPrompt).toBe(DEFAULT_MANAGER_PROMPT);
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepPrompt: 'Say yes to tests.' }));
-    const seeded = make();
-    expect(seeded.current().managerPrompt).toBe('Say yes to tests.');
-    // Once: an edit made after it is what stays.
-    seeded.update({ managerPrompt: 'Edited.' });
+    const loaded = make();
+    expect(loaded.current().managerPrompt).toBe(DEFAULT_MANAGER_PROMPT);
+    loaded.update({ managerPrompt: 'Edited.' });
     expect(make().current().managerPrompt).toBe('Edited.');
   });
 
