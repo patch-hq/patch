@@ -39,6 +39,11 @@ describe('ParentChatBar', () => {
     expect(JSON.stringify(r.toJSON())).toContain('Started by another chat');
   });
 
+  it('names the launching chat from the spawn frame when the device has not loaded it', () => {
+    const r = renderRN(<ParentChatBar row={{ ...row('gone'), parentChatName: 'builder' }} />);
+    expect(JSON.stringify(r.toJSON())).toContain('Started by \\"builder\\" chat');
+  });
+
   it('hides the bar when dismissed', () => {
     const r = renderRN(<ParentChatBar row={row('p1', 'c_dismiss')} />);
     findHost(r.root, byTestId('parent-chat-bar-dismiss')).props.onPress();

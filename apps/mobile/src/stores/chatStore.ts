@@ -916,6 +916,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // chat, or an older server) never clears one already known.
             jobId: event.jobId ?? row.jobId,
             ...(event.parentChatId !== undefined ? { parentChatId: event.parentChatId } : {}),
+            ...(event.parentChatName !== undefined ? { parentChatName: event.parentChatName } : {}),
           };
           break;
         }

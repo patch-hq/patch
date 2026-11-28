@@ -5091,6 +5091,7 @@ export class Daemon {
       hostId: this.opts.hostId,
       folder,
       ...(req.spawnedByChatId !== undefined ? { parentChatId: req.spawnedByChatId } : {}),
+      ...this.parentNameField(req.spawnedByChatId),
       // The model the chat STARTS on (spec/04 § Spawn); it can be changed later
       // (§ Model), and a change is announced on `chat.state`, not by re-emitting
       // this. Absent when this host has no model catalogue support configured
@@ -5315,6 +5316,12 @@ export class Daemon {
    * run once per chat on every reconnect, so a disk scan here was chats × chats file reads (the second time that froze a
    * 9,000-chat host). `state.subagent` mirrors `meta.subagent`.
    */
+  /** `parentChatName` for a `chat.spawned` frame, when this host knows the parent. */
+  private parentNameField(parentChatId: string | undefined): { parentChatName?: string } {
+    const name = parentChatId === undefined ? undefined : this.chatState.get(parentChatId)?.name;
+    return name ? { parentChatName: name } : {};
+  }
+
   listDelegates(parentChatId: string): DelegateSummary[] {
     const out: DelegateSummary[] = [];
     for (const live of this.chatState.list()) {
@@ -5463,6 +5470,7 @@ export class Daemon {
       hostId: this.opts.hostId,
       folder: state.folder,
       parentChatId,
+      ...this.parentNameField(parentChatId),
       ...(state.model !== undefined ? { model: state.model } : {}),
     });
     this.emitState(id);

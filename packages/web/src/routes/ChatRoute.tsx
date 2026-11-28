@@ -2554,7 +2554,11 @@ export function ChatRoute({
         <JobBar chatId={row.chatId} jobId={row.jobId} at={row.lastUserActivity} />
       ) : null}
       {row.parentChatId ? (
-        <ParentChatBar chatId={row.chatId} parentChatId={row.parentChatId} />
+        <ParentChatBar
+          chatId={row.chatId}
+          parentChatId={row.parentChatId}
+          spawnedName={row.parentChatName}
+        />
       ) : null}
       <div className="status-list" data-testid="status-list">
         <GoalBanner

@@ -189,6 +189,8 @@ export interface ChatRow {
    * for a chat a person or a job started. Drives the "Started by" banner.
    */
   parentChatId?: string;
+  /** The parent's name as the host knew it at spawn; used when the parent is not in the local store. */
+  parentChatName?: string;
   /**
    * The model this chat is running on: what it spawned with (`chat.spawned`),
    * then whatever a later change made it (`chat.state`, spec/04 § Model). Shown

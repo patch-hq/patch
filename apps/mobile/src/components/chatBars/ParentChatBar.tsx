@@ -19,7 +19,7 @@ export function ParentChatBar({ row }: { row: ChatRow }): ReactElement | null {
   const router = useRouter();
   const parentChatId = row.parentChatId ?? null;
   const parentName = useChatStore((s) =>
-    parentChatId === null ? null : (s.chats[parentChatId]?.name ?? null),
+    parentChatId === null ? null : (s.chats[parentChatId]?.name ?? row.parentChatName ?? null),
   );
   const [hidden, setHidden] = React.useState(dismissed.has(row.chatId));
   if (parentChatId === null || hidden) return null;
