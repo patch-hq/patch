@@ -2298,6 +2298,8 @@ export class Daemon {
   private readonly runs = new Map<string, Promise<unknown>>();
   /** Chats whose `chat.stopped` is owed but not yet emitted (`announceStopped`). */
   private readonly stopAnnouncePending = new Set<string>();
+  /** Chats whose owed `chat.stopped` is a promote's interruption, not a Stop (`promoteInput`). */
+  private readonly promoteStopPending = new Set<string>();
   /**
    * Per-chat in-flight streaming-text accumulator. When the SDK streams
    * `assistant_delta` chunks (real backend, `includePartialMessages`), the
@@ -8687,7 +8689,12 @@ export class Daemon {
     // Interrupting closes the SDK query; the pump's drainQueue then picks up
     // the queue head — already the promoted turn, or whatever was already
     // scheduled ahead of it.
-    await this.stopChat(chatId);
+    this.promoteStopPending.add(chatId);
+    try {
+      await this.stopChat(chatId);
+    } finally {
+      this.promoteStopPending.delete(chatId);
+    }
   }
 
   /**
@@ -8809,7 +8816,10 @@ export class Daemon {
    */
   private announceStopped(chatId: string): void {
     if (!this.stopAnnouncePending.delete(chatId)) return;
-    const stopped: ChatStoppedEvent = { type: 'chat.stopped', chatId, reason: 'user-stop' };
+    // A promote names itself: a surface must not have to guess interrupted from
+    // stopped off whether the chat has already flipped back to `running`.
+    const reason = this.promoteStopPending.delete(chatId) ? 'interrupted' : 'user-stop';
+    const stopped: ChatStoppedEvent = { type: 'chat.stopped', chatId, reason };
     this.emit(stopped);
   }
 

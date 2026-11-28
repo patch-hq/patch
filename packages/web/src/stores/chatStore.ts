@@ -2680,7 +2680,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // queued), the aborted run's own settle already flipped `activity` to
           // `idle` before this event arrives, so a running chat here means a
           // promote and anything else (idle, or no row at all) means bare.
-          const promoted = statusOf(chats[event.chatId]) === 'running';
+          // A host that names the interruption (`reason: 'interrupted'`) settles it;
+          // the chat still being `running` is only the inference for one that does not.
+          const promoted =
+            event.reason === 'interrupted' || statusOf(chats[event.chatId]) === 'running';
           // The interrupted turn's own message is the newest user entry that had
           // actually started: anything still `queued` (type-ahead behind this
           // turn) or `deliveryPending` (not yet observed) was never the running
