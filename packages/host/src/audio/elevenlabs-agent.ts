@@ -856,10 +856,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
         result = await manager.quick(name, stringArgs(params), this.quickContext());
       else {
         const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
-        result =
-          sent.reply === null
-            ? `Sent to "${sent.name}". It is on another computer, so its reply will be in that chat, not here.`
-            : `${RESULT_GIST_NOTE}"${sent.name}" replied: ${sent.reply}`;
+        result = `${RESULT_GIST_NOTE}"${sent.name}" replied: ${sent.reply}`;
       }
     } catch (err) {
       result = (err as Error).message;

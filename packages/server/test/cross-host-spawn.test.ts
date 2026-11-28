@@ -33,6 +33,7 @@ function harness(opts: { registered?: string[]; online?: string[] } = {}) {
       sent.push({ hostId, surfaceId, event });
     },
     isOnline: (id: string) => online.has(id),
+    onHostStatus: () => () => {},
     onEvent: (h: (e: WireEvent, from: string | null) => void) => {
       handler = h;
       return () => {

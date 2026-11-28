@@ -36,6 +36,8 @@ export interface RemoteRelayCoordinator<TResult> {
    * about the wait is identical across peek/history/send_to.
    */
   call(build: (requestId: string) => WireEvent, describeTimeout: () => string): Promise<TResult>;
+  /** Reject every call still waiting, e.g. when the link the answers come over drops. */
+  failAll(code: string, message: string): void;
   /** Feed an inbound `.response` in. Returns false for an unknown requestId. */
   resolve(event: {
     requestId: string;
@@ -48,7 +50,8 @@ export interface RemoteRelayCoordinator<TResult> {
 export function createRemoteRelayCoordinator<TResult = unknown>(deps: {
   emit: (event: WireEvent) => void;
   onUnknownResponse: (requestId: string) => void;
-  timeoutMs?: number;
+  /** How long a call waits for its answer; `null` waits until it comes or `failAll`. */
+  timeoutMs?: number | null;
   /** Injectable so a test can assert correlation without racing the clock. */
   newRequestId?: () => string;
   /** Prefix for minted ids — lets several coordinators share one server-side route map with no risk of collision. */
@@ -68,13 +71,16 @@ export function createRemoteRelayCoordinator<TResult = unknown>(deps: {
     async call(build, describeTimeout) {
       const requestId = newRequestId();
       return await new Promise<TResult>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          waiters.delete(requestId);
-          reject(new RemoteRelayError('sdk_error', describeTimeout()));
-        }, timeoutMs);
-        timer.unref?.();
+        const timer =
+          timeoutMs === null
+            ? undefined
+            : setTimeout(() => {
+                waiters.delete(requestId);
+                reject(new RemoteRelayError('sdk_error', describeTimeout()));
+              }, timeoutMs);
+        timer?.unref?.();
         waiters.set(requestId, (outcome) => {
-          clearTimeout(timer);
+          if (timer !== undefined) clearTimeout(timer);
           if (outcome.ok) {
             resolve(outcome.result);
             return;
@@ -83,6 +89,12 @@ export function createRemoteRelayCoordinator<TResult = unknown>(deps: {
         });
         deps.emit(build(requestId));
       });
+    },
+
+    failAll(code, message) {
+      const waiting = [...waiters.values()];
+      waiters.clear();
+      for (const waiter of waiting) waiter({ ok: false, code, message });
     },
 
     resolve(event) {

@@ -132,6 +132,7 @@ import {
   type RemoteSpawnRequest,
 } from './remote-spawn.js';
 import { createRemoteRelayCoordinator, RemoteRelayError } from './remote-relay.js';
+import { createChatDelivery } from './chatDelivery.js';
 import { ArtifactAutoRepublisher, ArtifactPublisher } from './artifacts.js';
 import { PadClient } from './pads.js';
 import { RemoteJobsStore } from './jobs-interface.js';
@@ -2143,6 +2144,29 @@ async function startHost(
     onUnknownResponse: (requestId) =>
       logger.warn({ requestId }, 'patch.send_to.response for an unknown request; dropping'),
   });
+  // The reply to a delivered message, read by the server from its record of
+  // the chat. It comes when the chat has answered, however long that takes;
+  // a dropped link fails every wait (the server forgets them then too).
+  const serverReplies = createRemoteRelayCoordinator<{ text: string }>({
+    emit: (event) => emit(event),
+    idPrefix: 'rreply',
+    timeoutMs: null,
+    onUnknownResponse: (requestId) =>
+      logger.warn({ requestId }, 'patch.reply.response for an unknown request; dropping'),
+  });
+  const replyFromServer = (req: {
+    sourceChatId: string;
+    targetChatId: string;
+    localId: string;
+  }): Promise<string> => {
+    assertServerReads('the reply');
+    return serverReplies
+      .call(
+        (requestId) => ({ type: 'patch.reply.request', requestId, ...req }),
+        () => 'the reply never came',
+      )
+      .then((result) => result.text);
+  };
   const remoteStops = createRemoteRelayCoordinator<undefined>({
     emit: (event) => emit(event),
     idPrefix: 'rstop',
@@ -2240,8 +2264,9 @@ async function startHost(
     sourceChatId: string;
     targetChatId: string;
     message: string;
+    localId: string;
     voicePrefix?: string;
-    revealTarget?: boolean;
+    revealTarget: boolean;
   }): Promise<void> =>
     remoteSendTos
       .call(
@@ -2250,8 +2275,9 @@ async function startHost(
           sourceChatId: req.sourceChatId,
           targetChatId: req.targetChatId,
           message: req.message,
+          localId: req.localId,
           requestId,
-          revealTarget: req.revealTarget ?? false,
+          revealTarget: req.revealTarget,
           ...(req.voicePrefix !== undefined ? { voicePrefix: req.voicePrefix } : {}),
         }),
         () => `patch_send_to: chat ${req.targetChatId}'s host did not answer in time`,
@@ -4317,9 +4343,8 @@ async function startHost(
           .submitInput({
             chatId: event.targetChatId,
             message: event.message,
-            // The requestId is already a unique key for this call; reusing it
-            // as the dedupe localId needs no separate id generator.
-            localId: requestId,
+            // The id the sender chose, so its reply can be found by it.
+            localId: event.localId,
             ...(event.voicePrefix !== undefined ? { voicePrefix: event.voicePrefix } : {}),
             origin: 'machine',
             // The origin host already decided whether its caller was
@@ -4354,6 +4379,10 @@ async function startHost(
       }
       if (event.type === 'patch.send_to.response') {
         remoteSendTos.resolve(event);
+        return;
+      }
+      if (event.type === 'patch.reply.response') {
+        serverReplies.resolve(event);
         return;
       }
       if (event.type === 'patch.stop') {
@@ -4573,6 +4602,10 @@ async function startHost(
       recordImport?.stop();
       delegateRecordImport?.stop();
       serverEventsClient.endAll('host→server link dropped');
+      serverReplies.failAll(
+        'host_not_registered',
+        'the link to the Patch server dropped before the reply came',
+      );
       artifactPublisher.failAll(
         'artifact publish: host→server link dropped before the server answered',
       );
@@ -4657,10 +4690,20 @@ async function startHost(
     },
   });
   // spec/07 § A call to the Manager — a hosted voice on the Manager chat sends
-  // to other chats itself. Their replies are caught by the sent turn's own
-  // localId on a bridge of their own, so they never displace a voice session's
-  // hand-off waiting on the same chat.
-  const managerVoiceReplies = createVoiceReplyBridge();
+  // to other chats itself, as `patch_send_to` does, and reads their replies
+  // from the server's record, so a chat on any host answers into the call.
+  // The Daemon is built later in boot; this only runs once a call is up.
+  const deliverToChat = createChatDelivery({
+    daemon: {
+      submitInput: (req) => daemon.submitInput(req),
+      get chatState() {
+        return daemon.chatState;
+      },
+    },
+    runsManager: () => runsManager,
+    sendToRemoteChat,
+    emitWire: (event) => emit(event),
+  });
   const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
   /** Run a command-line tool for a Manager-call action; its failure is the action's failure. */
   const runTool = (cmd: string, args: string[], what: string): Promise<string> =>
@@ -4701,29 +4744,19 @@ async function startHost(
     logger: logger.child({ component: 'manager-voice' }),
     voicePrompt: () => managerVoicePrompt,
     listChats: listAccountChats,
-    isLocal: (chatId) => daemon.chatState.has(chatId),
-    chatDetail: (chatId) => daemon.voiceContext(chatId, { maxChars: 2_000 }),
-    submitInput: async ({ chatId, message, localId }) => {
-      // The same delivery patch_send_to makes: a machine turn, and the Manager is visible.
-      await daemon.submitInput({ chatId, message, localId, origin: 'machine', fromAgent: true });
-      emit({
-        type: 'patch.send_to',
-        sourceChatId: MANAGER_CHAT_ID,
-        targetChatId: chatId,
+    peekChat: async (chatId) =>
+      (await peekFromServer({ sourceChatId: MANAGER_CHAT_ID, targetChatId: chatId, limit: 1 }))
+        .chat_state,
+    deliver: ({ chatId, message, localId }) =>
+      deliverToChat({
+        callerChatId: MANAGER_CHAT_ID,
+        chatId,
         message,
-        revealTarget: true,
-      });
-    },
-    awaitReply: (chatId, localId) =>
-      managerVoiceReplies.awaitReply(chatId, undefined, localId).then((reply) => reply.text),
-    abandonReply: (chatId, err) => managerVoiceReplies.abandon(chatId, err),
-    sendRemote: ({ chatId, message }) =>
-      sendToRemoteChat({
-        sourceChatId: MANAGER_CHAT_ID,
-        targetChatId: chatId,
-        message,
+        localId,
         revealTarget: true,
       }),
+    awaitReply: ({ chatId, localId }) =>
+      replyFromServer({ sourceChatId: MANAGER_CHAT_ID, targetChatId: chatId, localId }),
     timers: requestTimers,
     addTask: async ({ content, due, project }) =>
       (
@@ -4812,7 +4845,6 @@ async function startHost(
     const addressed = (event as { chatId?: unknown }).chatId;
     if (typeof addressed === 'string' && daemon.isSubagent(addressed)) return;
     voiceReplies.observe(event);
-    managerVoiceReplies.observe(event);
     chatVoice.observe(event);
     link.send(event);
   }

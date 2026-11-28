@@ -264,6 +264,9 @@ type ChatState = {
   folder: string;
   chatStatus: ChatStatusInfo | null; // the server's status, 12-error-and-offline.md
   status: 'active' | 'archived' | 'errored' | 'deleted'; // lifecycle
+  statusSummary: string | null; // the one-line status the chat last wrote
+  goal: string | null;
+  todos: { text: string; status: 'pending' | 'in_progress' | 'completed' }[];
   pinned: boolean;
   pinnedAt: number | null;
   snoozedUntil: number | null;

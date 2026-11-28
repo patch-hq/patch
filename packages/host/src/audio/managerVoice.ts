@@ -19,6 +19,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import { DEFAULT_MANAGER_VOICE_PROMPT } from '@patch/wire';
+import { stripVoiceTag } from '../chatRunner.js';
 
 /** The chat a call must be on to be a Manager call. */
 export const MANAGER_CHAT_ID = 'thread_manager';
@@ -296,8 +297,6 @@ export class ManagerChatLookupError extends Error {}
 /** What the send tells the voice once the chat has the message. */
 export interface ManagerSendAccepted {
   name: string;
-  /** False for a chat on another host: its reply stays in that chat and does not come back. */
-  replyComing: boolean;
 }
 
 /** Where a quick tool was called from. */
@@ -328,8 +327,8 @@ export interface ManagerVoiceTools {
   /**
    * Deliver `message` to the chat named by `chat`. `onAccepted` fires once the
    * chat has it (queued or started); the promise resolves with the chat's reply
-   * once its turn settles, or with `reply: null` when no reply can come back
-   * (a chat on another host). Rejects with {@link ManagerChatLookupError} when
+   * once its turn settles, whichever host the chat is on. Rejects with
+   * {@link ManagerChatLookupError} when
    * the name does not pick out one chat, and with a plain error when the
    * message was not delivered or the chat's turn failed.
    */
@@ -337,7 +336,7 @@ export interface ManagerVoiceTools {
     chat: string;
     message: string;
     onAccepted?: (info: ManagerSendAccepted) => void;
-  }): Promise<{ name: string; reply: string | null }>;
+  }): Promise<{ name: string; reply: string }>;
 }
 
 /** One chat as the Manager voice sees it in a listing. */
@@ -351,30 +350,16 @@ export interface ManagerChatEntry {
   lastUpdated?: number;
 }
 
-export interface ManagerChatDetail {
-  name: string | null;
-  status: string | null;
-  goal: string | null;
-  openTodos: string[];
-  turns: Array<{ role: 'user' | 'model'; text: string }>;
-}
-
 export interface ManagerVoiceHostDeps {
   logger: Logger;
-  /** Every chat the account has (all hosts when the server can be asked). */
+  /** Every chat the account has, on every host, from the server (`patch_list_chats`). */
   listChats(): Promise<ManagerChatEntry[]>;
-  /** True when `chatId` lives on this host. */
-  isLocal(chatId: string): boolean;
-  /** A chat on this host: what it is and where it stands. */
-  chatDetail(chatId: string): ManagerChatDetail;
-  /** Deliver a message to a chat on this host; resolves once it is accepted. */
-  submitInput(req: { chatId: string; message: string; localId: string }): Promise<void>;
-  /** Wait for the turn started by `localId` on `chatId` to settle, with its reply text. */
-  awaitReply(chatId: string, localId: string): Promise<string>;
-  /** Drop a waiter whose message never went in. */
-  abandonReply(chatId: string, err: Error): void;
-  /** Deliver a message to a chat on another host. */
-  sendRemote(req: { chatId: string; message: string }): Promise<void>;
+  /** A chat as the server's record holds it, on any host (`patch_peek`'s `chat_state`). */
+  peekChat(chatId: string): Promise<unknown>;
+  /** Deliver a message as `patch_send_to` does; resolves once the chat has it. */
+  deliver(req: { chatId: string; message: string; localId: string }): Promise<void>;
+  /** The chat's reply to the message delivered as `localId`, read by the server from its record. */
+  awaitReply(req: { chatId: string; localId: string }): Promise<string>;
   /** Add a to-do; resolves with the task as it was filed. Rejects when Todoist is unreachable. */
   addTask(req: { content: string; due: string; project: string }): Promise<string>;
   /** Open to-dos, on one project or (empty name) across all. Rejects when the project is unknown. */
@@ -572,6 +557,38 @@ export function resolveChat(listing: ManagerChatEntry[], chat: string): ManagerC
   );
 }
 
+/** Where a chat stands, from `patch_peek`'s `chat_state` (built by the server's agent-reads). */
+interface ChatDetail {
+  status: string | null;
+  goal: string | null;
+  openTodos: string[];
+  messages: Array<{ role: 'user' | 'assistant'; text: string }>;
+}
+
+function chatDetail(chatState: unknown): ChatDetail {
+  if (chatState === null || typeof chatState !== 'object') {
+    throw new Error('The Patch server sent no state for the chat.');
+  }
+  const st = chatState as Record<string, unknown>;
+  const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
+  const todos = Array.isArray(st['todos']) ? (st['todos'] as Array<Record<string, unknown>>) : [];
+  const messages = Array.isArray(st['lastMessages'])
+    ? (st['lastMessages'] as Array<Record<string, unknown>>)
+    : [];
+  return {
+    status: text(st['statusSummary']),
+    goal: text(st['goal']),
+    openTodos: todos.flatMap((t) =>
+      t['status'] !== 'completed' && typeof t['text'] === 'string' ? [t['text']] : [],
+    ),
+    messages: messages.flatMap((m) =>
+      (m['role'] === 'user' || m['role'] === 'assistant') && typeof m['content'] === 'string'
+        ? [{ role: m['role'], text: m['content'] }]
+        : [],
+    ),
+  };
+}
+
 export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoiceTools {
   const now = deps.now ?? Date.now;
   /** Targets with a message out and no reply yet: a second send would cut the first off. */
@@ -719,18 +736,15 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
 
     async chatStatus(chat) {
       const target = await resolve(chat);
-      if (!deps.isLocal(target.chatId)) {
-        return `${line(target)}. It is on another computer, so its messages cannot be read from this call.`;
-      }
-      const d = deps.chatDetail(target.chatId);
+      const d = chatDetail(await deps.peekChat(target.chatId));
       const out = [line(target)];
       if (d.status) out.push(`Where it stands: ${d.status}`);
       if (d.goal) out.push(`Goal: ${d.goal}`);
       if (d.openTodos.length > 0) out.push(`Still to do: ${d.openTodos.slice(0, 6).join('; ')}`);
-      const recent = d.turns.slice(-4).map((t) => {
-        const flat = t.text.replace(/\s+/g, ' ');
+      const recent = d.messages.slice(-4).map((m) => {
+        const flat = stripVoiceTag(m.text).replace(/\s+/g, ' ').trim();
         const short = flat.length > 300 ? `${flat.slice(0, 299).trimEnd()}…` : flat;
-        return `${t.role === 'user' ? 'User' : 'Agent'}: ${short}`;
+        return `${m.role === 'user' ? 'User' : 'Agent'}: ${short}`;
       });
       if (recent.length > 0) out.push(`Last messages:\n${recent.join('\n')}`);
       return out.join('\n');
@@ -740,34 +754,25 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
       const target = await resolve(chat);
       const name = displayName(target);
       if (message.trim() === '') throw new ManagerChatLookupError('Say what to tell the chat.');
-      if (!deps.isLocal(target.chatId)) {
-        await deps.sendRemote({ chatId: target.chatId, message });
-        deps.recordNote(`-> "${name}" (on another computer; its reply stays there): ${message}`);
-        onAccepted?.({ name, replyComing: false });
-        return { name, reply: null };
-      }
       if (awaiting.has(target.chatId)) {
         throw new ManagerChatLookupError(
           `"${name}" has not answered the last message yet. Tell the user, and send this once it has.`,
         );
       }
       const localId = `manager-voice-${now()}-${randomUUID().slice(0, 8)}`;
-      // Registered before the message goes in, so the reply's first message is not missed.
-      const replyPromise = deps.awaitReply(target.chatId, localId);
-      // A rejection that lands before we await it below is still handled there.
-      replyPromise.catch(() => undefined);
       awaiting.add(target.chatId);
       try {
-        await deps.submitInput({ chatId: target.chatId, message, localId });
+        await deps.deliver({ chatId: target.chatId, message, localId });
       } catch (err) {
         awaiting.delete(target.chatId);
-        deps.abandonReply(target.chatId, err as Error);
         throw err;
       }
       deps.recordNote(`-> "${name}": ${message}`);
-      onAccepted?.({ name, replyComing: true });
+      onAccepted?.({ name });
       try {
-        const reply = await replyPromise;
+        // Read from the server's record by the message's own id, so it is this
+        // message's reply even when the chat was busy and took it later.
+        const reply = await deps.awaitReply({ chatId: target.chatId, localId });
         deps.recordNote(`<- "${name}": ${reply.trim() === '' ? '(no reply text)' : reply.trim()}`);
         return { name, reply };
       } catch (err) {
