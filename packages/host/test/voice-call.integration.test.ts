@@ -177,7 +177,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
   };
   const sockets: WebSocket[] = [];
   /** Pick up a call on `chatId` from a web surface; resolves once Gemini is on the line. */
-  const call = async (chatId: string) => {
+  const call = async (chatId: string, resumed = false) => {
     const sessionId = `s-${randomUUID()}`;
     const ws = new WebSocket(`ws://127.0.0.1:${server!.port}/audio/${sessionId}`);
     sockets.push(ws);
@@ -197,8 +197,16 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
         role: 'voice-call',
         token: mintToken(sessionId, chatId),
         surfaceHasAec: true,
+        ...(resumed ? { resumed: true } : {}),
       }),
     );
+    if (resumed)
+      return {
+        closed: new Promise<string>((res) =>
+          ws.once('close', (_c: number, r: Buffer) => res(r.toString())),
+        ),
+        geminiCount: () => geminis.length - before,
+      };
     await vi.waitFor(() => expect(geminis.length).toBe(before + 1));
     const gemini = geminis[before]!;
     await vi.waitFor(() => expect(gemini.sent.length).toBeGreaterThan(0));
@@ -446,6 +454,21 @@ describe('a voice call, end to end', () => {
     c.gemini.say({ serverContent: { turnComplete: true } });
     await expect(c.closed).resolves.toBe('ended_by_agent');
     await vi.waitFor(() => expect(w.banners()).toHaveLength(1));
+  });
+
+  it('a redial just after the agent hung up is ended, not given a new call', async () => {
+    const chatId = await begin();
+    const c = await w.call(chatId);
+    c.gemini.say(speech());
+    c.gemini.say({ toolCall: { functionCalls: [{ id: 'e1', name: 'end_call', args: {} }] } });
+    c.gemini.say({ serverContent: { turnComplete: true } });
+    await expect(c.closed).resolves.toBe('ended_by_agent');
+    const r = (await w.call(chatId, true)) as {
+      closed: Promise<string>;
+      geminiCount: () => number;
+    };
+    await expect(r.closed).resolves.toBe('ended_by_agent');
+    expect(r.geminiCount()).toBe(0);
   });
 
   it('leaves a banner for a call that handed nothing off', async () => {
