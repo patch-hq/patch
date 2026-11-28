@@ -17,13 +17,13 @@
  * that makes a wire frame's new shape mandatory rather than additive — that is
  * the moment older hosts stop being able to hold up their end.
  */
-// 1.1.2159 is the first host that reads `patch.voice.direct_call_end` (a direct
+// 1.1.2168 is the first host that reads `patch.voice.direct_call_end` (a direct
 // call's cost, spec/07 § Call cost), reports `voiceKeys.groq` and reads Groq,
 // speech and transcription models into `voiceCatalog`: every surface now takes
 // a direct call's cloud models from that read, so an older host's direct calls
 // would have none to offer. (It also sends every app session the heartbeat,
 // from 1.1.2158.)
-export const MIN_SUPPORTED_HOST_VERSION = '1.1.2159';
+export const MIN_SUPPORTED_HOST_VERSION = '1.1.2168';
 
 export type HostSupport =
   | { supported: true }
