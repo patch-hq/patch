@@ -66,6 +66,19 @@ const DEVICES = [
   },
 ] as never;
 
+/** This phone's saved setup: Android's own engines. */
+const PHONE_SETUP = {
+  stt: { engine: 'android' as const, model: 'android-on-device' },
+  tts: { engine: 'android' as const, model: 'android-tts' },
+};
+
+function seed(deviceDirectCall: Record<string, unknown> = { 'phone-1': PHONE_SETUP }): void {
+  seedSettings({
+    devices: DEVICES,
+    preferences: { ...settingsFixture().preferences, deviceDirectCall: deviceDirectCall as never },
+  });
+}
+
 const mounted: ReturnType<typeof renderBase>[] = [];
 function renderRN(el: React.ReactElement): ReturnType<typeof renderBase> {
   const r = renderBase(el);
@@ -95,7 +108,7 @@ async function open(r: ReturnType<typeof renderRN>, id: string): Promise<void> {
 
 describe('Direct calls (phone)', () => {
   it('lists each device with its setup in one line, No speech engine, or not reported', () => {
-    seedSettings({ devices: DEVICES });
+    seed();
     const r = renderRN(<DirectCallsSection />);
     expect(textOf(findHost(r.root, byTestId('direct-phone-1-summary')))).toBe('Android → Android');
     expect(textOf(findHost(r.root, byTestId('direct-mac-1-summary')))).toBe('No speech engine');
@@ -103,7 +116,7 @@ describe('Direct calls (phone)', () => {
   });
 
   it('opens to its steps with only the reported engines, labelled On device / Cloud', async () => {
-    seedSettings({ devices: DEVICES });
+    seed();
     const r = renderRN(<DirectCallsSection />);
     await open(r, 'phone-1');
     expect(textOf(findHost(r.root, byTestId('direct-phone-1-stt-row')))).toContain(
@@ -120,44 +133,44 @@ describe('Direct calls (phone)', () => {
     expect(queryHost(r.root, byTestId('direct-phone-1-sound'))).toBeNull();
   });
 
-  it('choosing ElevenLabs writes the setup; its sound controls follow once a voice is chosen', async () => {
-    seedSettings({ devices: DEVICES });
+  it('an unset phone reads Set up and chooses nothing; each step is written as it is chosen', async () => {
+    seed({});
     const r = renderRN(<DirectCallsSection />);
+    expect(textOf(findHost(r.root, byTestId('direct-phone-1-summary')))).toBe('Set up');
     await open(r, 'phone-1');
+    expect(
+      findHost(r.root, byTestId('direct-phone-1-stt-android')).props.accessibilityState.selected,
+    ).toBe(false);
+    expect(queryHost(r.root, byTestId('direct-phone-1-tts-row'))).toBeNull();
     await actAsync(async () => {
-      findHost(r.root, byTestId('direct-phone-1-tts-elevenlabs')).props.onPress();
+      findHost(r.root, byTestId('direct-phone-1-stt-groq')).props.onPress();
       await flush();
     });
     expect(api.setPreferences).toHaveBeenLastCalledWith({
-      deviceDirectCall: {
-        'phone-1': {
-          stt: { engine: 'android', model: 'android-on-device' },
-          tts: { engine: 'elevenlabs' },
-        },
+      deviceDirectCall: { 'phone-1': { stt: { engine: 'groq' } } },
+    });
+  });
+
+  it('ElevenLabs shows its sound controls once its voice is chosen', async () => {
+    seed({
+      'phone-1': {
+        stt: { engine: 'android', model: 'android-on-device' },
+        tts: { engine: 'elevenlabs', model: 'eleven_flash_v2_5', voice: 'v-george' },
       },
     });
-    seedSettings({
-      devices: DEVICES,
-      preferences: {
-        ...settingsFixture().preferences,
-        deviceDirectCall: {
-          'phone-1': {
-            stt: { engine: 'android' },
-            tts: { engine: 'elevenlabs', voice: 'v-george' },
-          },
-        },
-      },
-    });
-    const r2 = renderRN(<DirectCallsSection />);
-    await open(r2, 'phone-1');
+    const r = renderRN(<DirectCallsSection />);
+    expect(textOf(findHost(r.root, byTestId('direct-phone-1-summary')))).toBe(
+      'Android → ElevenLabs',
+    );
+    await open(r, 'phone-1');
     for (const c of ['tone', 'stability', 'similarity', 'style', 'speed']) {
-      expect(queryHost(r2.root, byTestId(`direct-phone-1-${c}`))).not.toBeNull();
+      expect(queryHost(r.root, byTestId(`direct-phone-1-${c}`))).not.toBeNull();
     }
-    expect(textOf(findHost(r2.root, byTestId('direct-phone-1-speed-value')))).toBe('0.95×');
+    expect(textOf(findHost(r.root, byTestId('direct-phone-1-speed-value')))).toBe('0.95×');
   });
 
   it('a device that never reported says so', async () => {
-    seedSettings({ devices: DEVICES });
+    seed();
     const r = renderRN(<DirectCallsSection />);
     await open(r, 'web-1');
     expect(textOf(findHost(r.root, byTestId('direct-web-1-unreported')))).toBe(

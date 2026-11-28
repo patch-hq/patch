@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { NOT_SET_UP } from '@patch/wire/direct-call';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
@@ -69,7 +70,20 @@ beforeEach(async () => {
   await endDirectCall();
   useVoiceStore.setState({ activeSession: null, callDirect: null, callPaused: null });
   usePresenceStore.setState({ hosts: {}, surfaceId: 's-phone' } as never);
-  useSettingsStore.setState({ data: { preferences: { ...DEFAULT_SHARED_SETTINGS } } } as never);
+  useSettingsStore.setState({
+    data: {
+      preferences: {
+        ...DEFAULT_SHARED_SETTINGS,
+        // This phone's saved direct-call setup: Android's own engines.
+        deviceDirectCall: {
+          's-phone': {
+            stt: { engine: 'android', model: 'on-device' },
+            tts: { engine: 'android', model: 'android-tts', voice: 'en-gb-x-gba-local' },
+          },
+        },
+      },
+    },
+  } as never);
   useChatStore.setState({
     chats: { c1: { chatId: 'c1', chatStatus: { state: 'idle', since: 0 } } },
     timelines: { c1: [] },
@@ -143,6 +157,16 @@ describe('direct call refusals and pause', () => {
     await startDirectCall('c1', { mod, mic: fakeMic().mic });
     expect(useVoiceStore.getState().activeSession).toBeNull();
     expect(pushError).toHaveBeenCalledWith('Cannot call direct: No speech engine');
+  });
+
+  it('a phone with engines but no saved setup is not set up: nothing is chosen for it', async () => {
+    useSettingsStore.setState({
+      data: { preferences: { ...DEFAULT_SHARED_SETTINGS } },
+    } as never);
+    const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
+    await startDirectCall('c1', { mod: fakeModule().mod, mic: fakeMic().mic });
+    expect(useVoiceStore.getState().activeSession).toBeNull();
+    expect(pushError).toHaveBeenCalledWith(`Cannot call direct: ${NOT_SET_UP}`);
   });
 
   it('pause releases the microphone and keeps the call; resume opens it again', async () => {

@@ -8,6 +8,7 @@ import {
   directCallSummary,
   DirectCallSetup,
   NO_SPEECH_ENGINE,
+  NOT_SET_UP,
   resolveDirectCall,
   speakablePieces,
   type SpeechEngineReport,
@@ -36,27 +37,48 @@ describe('resolveDirectCall', () => {
     });
   });
 
-  it('with no setup chosen, runs on-device engines first', () => {
-    const r = resolveDirectCall(desktop, undefined, {});
-    expect(r.ok && r.call).toEqual({
-      stt: { engine: 'parakeet', where: 'device', model: 'parakeet-tdt-0.6b-v3' },
-      tts: {
-        engine: 'kokoro',
-        where: 'device',
-        model: 'kokoro-82m',
-        voice: 'af_heart',
-        sound: { speed: 1 },
+  it('with no setup saved the device is not set up: nothing is chosen for it', () => {
+    expect(resolveDirectCall(desktop, undefined, {})).toEqual({ ok: false, reason: NOT_SET_UP });
+    expect(
+      resolveDirectCall(
+        desktop,
+        { stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' } },
+        {},
+      ),
+    ).toEqual({ ok: false, reason: NOT_SET_UP });
+    // A setup missing a model or a voice is not finished either.
+    expect(
+      resolveDirectCall(
+        desktop,
+        {
+          stt: { engine: 'parakeet' },
+          tts: { engine: 'kokoro', model: 'kokoro-82m', voice: 'af_heart' },
+        },
+        {},
+      ),
+    ).toEqual({ ok: false, reason: NOT_SET_UP });
+    const done = resolveDirectCall(
+      desktop,
+      {
+        stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' },
+        tts: { engine: 'kokoro', model: 'kokoro-82m', voice: 'af_heart' },
       },
-    });
-    expect(r.ok && directCallSummary(r.call)).toBe('Parakeet → Kokoro');
+      {},
+    );
+    expect(done.ok && directCallSummary(done.call)).toBe('Parakeet → Kokoro');
   });
 
-  it('runs the chosen setup: the engine’s controls, stored or default, and the voice’s tone', () => {
+  it('runs the saved setup: the engine’s controls, stored or default, and the voice’s tone', () => {
     const r = resolveDirectCall(
       desktop,
       {
-        stt: { engine: 'groq' },
-        tts: { engine: 'elevenlabs', voice: 'v2', sound: { stability: 0.5 } },
+        stt: { engine: 'groq', model: 'whisper-large-v3-turbo' },
+        tts: {
+          engine: 'elevenlabs',
+          model: 'eleven_flash_v2_5',
+          voice: 'v2',
+          sound: { stability: 0.5 },
+        },
       },
       { 'elevenlabs:v2': 'calm', 'elevenlabs:v1': 'brisk' },
     );
@@ -67,12 +89,16 @@ describe('resolveDirectCall', () => {
       voice: 'v2',
       sound: { stability: 0.5, similarity: 0.8, style: 0, speed: 0.95, tone: 'calm' },
     });
-    const k = resolveDirectCall(
+    // A model or voice the device no longer reports is refused, naming it.
+    const gone = resolveDirectCall(
       desktop,
-      { stt: { engine: 'parakeet' }, tts: { engine: 'kokoro', sound: { speed: 1.1 } } },
+      {
+        stt: { engine: 'groq', model: 'whisper-old' },
+        tts: { engine: 'kokoro', model: 'kokoro-82m', voice: 'af_heart' },
+      },
       {},
     );
-    expect(k.ok && k.call.tts.sound).toEqual({ speed: 1.1 });
+    expect(!gone.ok && gone.reason).toMatch(/no longer has the model whisper-old/);
   });
 
   it('a stored sound must fit its engine’s description', () => {
@@ -111,7 +137,10 @@ describe('resolveDirectCall', () => {
         stt: desktop.stt,
         tts: [{ engine: 'elevenlabs', where: 'cloud', models: ['m'], voices: [] }],
       },
-      undefined,
+      {
+        stt: { engine: 'groq', model: 'whisper-large-v3-turbo' },
+        tts: { engine: 'elevenlabs', model: 'm' },
+      },
       {},
     );
     expect(!r.ok && r.reason).toMatch(/ElevenLabs has no voice/);
@@ -185,16 +214,16 @@ describe('cloudSpeechEnginesFromHosts', () => {
 });
 
 describe('Settings steps (directCallSteps / changeDirectCall)', () => {
-  it('offers only what the device reported, on-device first, labelled by where it runs', () => {
+  it('offers only what the device reported, on-device first; with nothing saved, nothing is chosen', () => {
     const s = directCallSteps(desktop, undefined, {});
     expect(s.stt.options).toEqual([
       { engine: 'parakeet', label: 'Parakeet', where: 'device' },
       { engine: 'groq', label: 'Groq Whisper', where: 'cloud' },
     ]);
     expect(s.tts.options.map((o) => o.engine)).toEqual(['kokoro', 'elevenlabs']);
-    expect(s.stt.engine).toBe('parakeet');
-    expect(s.voice).toEqual({ options: ['af_heart'], value: 'af_heart' });
-    expect(s.summary).toBe('Parakeet → Kokoro');
+    expect(s.stt.engine).toBeUndefined();
+    expect(s.tts.engine).toBeUndefined();
+    expect(s.summary).toBe('Set up');
     expect(s.problem).toBeUndefined();
   });
 
@@ -211,7 +240,7 @@ describe('Settings steps (directCallSteps / changeDirectCall)', () => {
       {},
     );
     expect(s.stt.engine).toBe('android');
-    expect(s.summary).toBe('Needs setting up');
+    expect(s.summary).toBe('Set up');
     expect(s.problem).toMatch(/Android, which it does not have/);
   });
 
@@ -230,8 +259,12 @@ describe('Settings steps (directCallSteps / changeDirectCall)', () => {
       stt: setup.stt,
       tts: { engine: 'kokoro' },
     });
+    // Speech to text is the first step: every step after it is chosen again.
     expect(changeDirectCall(s, { step: 'stt', engine: 'parakeet' })).toEqual({
       stt: { engine: 'parakeet' },
+    });
+    expect(changeDirectCall(s, { step: 'sttModel', model: 'whisper-large-v3' })).toEqual({
+      stt: { engine: 'groq', model: 'whisper-large-v3' },
       tts: setup.tts,
     });
     expect(changeDirectCall(s, { step: 'voice', voice: 'v1' }).tts).toEqual({
