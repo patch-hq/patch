@@ -245,7 +245,7 @@ describe('Snooze until complete', () => {
     daemon.shutdown();
   });
 
-  it('a host restart wakes it when nothing is left to resume', async () => {
+  it('a host restart leaves the snooze alone even when nothing is left to resume', async () => {
     const { backend } = gated();
     const first = setup(backend);
     const id = await first.daemon.spawnChat({ folder: first.folder });
@@ -254,7 +254,7 @@ describe('Snooze until complete', () => {
     first.daemon.shutdown();
     const second = setup(backend, first.home);
     second.daemon.hydrate();
-    expect(second.daemon.chatState.get(id)?.snoozedUntil ?? null).toBe(null);
+    expect(second.daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
     second.daemon.shutdown();
   });
 

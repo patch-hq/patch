@@ -31,6 +31,7 @@ import {
   type LoggedEvent,
   type NativeRef,
   type TurnOutcome,
+  isReservedSpecialThread,
 } from '@patch/wire';
 
 /**
@@ -147,6 +148,8 @@ interface ChatLogState {
   lastMessage: string | null;
   /** The seq of that message, or -1 when there is none. */
   lastMessageSeq: number;
+  /** Who started the turn now being written (live only; unknown after a restart). */
+  turnOrigin?: 'user' | 'machine';
   /** Whether the file has its `log.start` record. */
   started: boolean;
   legacyUpTo: number | undefined;
@@ -377,6 +380,11 @@ export class ChatLog {
     let hw = -1;
     let lastMessage: string | null = null;
     let lastMessageSeq = -1;
+    // The Manager and Speakers take machine turns (a digest of finished chats):
+    // their reply to one is not news, so it is not the message a chat is unread
+    // from. Found by walking back to the turn's own `turn.start`.
+    const special = isReservedSpecialThread(chatId);
+    let candidate = -1;
     let hwSettled = false;
     let openTurn: { turnId: string; branchId: string } | null = null;
     let lastTurnOutcome: TurnOutcome | null = null;
@@ -386,7 +394,15 @@ export class ChatLog {
     this.walkBackwards(chatId, state, (rec) => {
       if (lastMessage === null) {
         lastMessage = messageHead(rec);
-        if (lastMessage !== null) lastMessageSeq = rec.seq;
+        if (lastMessage !== null && !special) lastMessageSeq = rec.seq;
+      }
+      if (special && lastMessageSeq < 0) {
+        if (candidate < 0) {
+          if (messageHead(rec) !== null) candidate = rec.seq;
+        } else if (rec.rec.k === 'turn.start') {
+          if (rec.rec.origin !== 'machine') lastMessageSeq = candidate;
+          candidate = -1;
+        }
       }
       if (!hwSettled) {
         hw = Math.max(hw, rec.seq);
@@ -415,8 +431,15 @@ export class ChatLog {
           }
         }
       }
-      return !(hwSettled && turnStartFound && lastMessage !== null);
+      return !(
+        hwSettled &&
+        turnStartFound &&
+        lastMessage !== null &&
+        (!special || lastMessageSeq >= 0)
+      );
     });
+    // A reply with no turn record before it (the start of the log) is counted.
+    if (special && lastMessageSeq < 0 && candidate >= 0) lastMessageSeq = candidate;
     return { hw, openTurn, lastTurnOutcome, lastTurnLocalId, lastMessage, lastMessageSeq };
   }
 
@@ -665,9 +688,12 @@ export class ChatLog {
       state.lastBranchId = record.branchId;
       state.recordedHw = Math.max(state.recordedHw, record.seq);
       const said = messageHead(record);
+      if (record.rec.k === 'turn.start') state.turnOrigin = record.rec.origin;
       if (said !== null) {
         state.lastMessage = said;
-        state.lastMessageSeq = record.seq;
+        if (!(isReservedSpecialThread(chatId) && state.turnOrigin === 'machine')) {
+          state.lastMessageSeq = record.seq;
+        }
       }
       if (state.index) {
         if (state.records % INDEX_STRIDE === 0) {

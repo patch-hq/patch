@@ -13,27 +13,29 @@ export function NeedsYouBar({ chatId }: { chatId: string }): JSX.Element | null 
   const row = useChatStore((s) => s.chats[chatId]);
   if (!row || !isAskOutstanding(row) || !row.statusSummary) return null;
   return (
-    <div
-      className="ask-human-card needs-you-bar"
-      data-testid="needs-you-bar"
-      role="group"
-      aria-label="needs you"
-    >
-      <Hand size={14} aria-hidden className="ask-human-icon" />
-      <div className="ask-human-body">
-        <p className="ask-human-why">Needs you</p>
-        <p className="ask-human-task" data-testid="needs-you-text">
-          <ActionText text={row.statusSummary} />
-        </p>
-      </div>
-      <button
-        type="button"
-        className="ask-human-done"
-        data-testid="needs-you-done"
-        onClick={() => pressAskDone(chatId)}
+    <div className="needs-you-wrap">
+      <div
+        className="ask-human-card needs-you-bar"
+        data-testid="needs-you-bar"
+        role="group"
+        aria-label="needs you"
       >
-        Done
-      </button>
+        <Hand size={14} aria-hidden className="ask-human-icon" />
+        <div className="ask-human-body">
+          <p className="ask-human-why">Needs you</p>
+          <p className="ask-human-task" data-testid="needs-you-text">
+            <ActionText text={row.statusSummary} />
+          </p>
+        </div>
+        <button
+          type="button"
+          className="ask-human-done"
+          data-testid="needs-you-done"
+          onClick={() => pressAskDone(chatId)}
+        >
+          Done
+        </button>
+      </div>
     </div>
   );
 }
