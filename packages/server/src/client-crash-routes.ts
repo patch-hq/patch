@@ -23,8 +23,8 @@ import type { IssueFiler } from './issue-filer.js';
 
 const ClientCrashBody = z
   .object({
-    /** Where it was caught: error boundary, global JS handler, or native. */
-    source: z.enum(['boundary', 'global', 'native']),
+    /** Where it was caught: error boundary, global JS handler, native, or the stall watchdog. */
+    source: z.enum(['boundary', 'global', 'native', 'stall']),
     message: z.string().max(LIMIT.message),
     stack: z.string().max(LIMIT.stack).optional(),
     componentStack: z.string().max(LIMIT.componentStack).optional(),
@@ -87,14 +87,16 @@ export function registerClientCrashRoutes(app: FastifyInstance, deps: ClientCras
     mkdirSync(dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify(stored)}\n`);
     deps.logger.error({ clientCrash: stored }, 'client crash reported');
-    deps.issueFiler?.reportAuto({
-      kind: 'client-crash',
-      message: stored.message,
-      stack: stored.stack,
-      surface: 'mobile',
-      route: stored.route,
-      build: stored.build,
-    });
+    // A stall is a diagnostic for the host log, not a bug report to file.
+    if (stored.source !== 'stall')
+      deps.issueFiler?.reportAuto({
+        kind: 'client-crash',
+        message: stored.message,
+        stack: stored.stack,
+        surface: 'mobile',
+        route: stored.route,
+        build: stored.build,
+      });
     return { ok: true };
   });
 

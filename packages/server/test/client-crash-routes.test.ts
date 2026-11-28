@@ -67,6 +67,24 @@ describe('/api/client-crashes', () => {
     expect(get.json().crashes[0].chatId).toBe('chat-1');
   });
 
+  it('accepts a stall report from the watchdog and files no issue for it', async () => {
+    const { app, auth } = await boot();
+    const stall = {
+      source: 'stall',
+      message: 'JS thread blocked for 12.0s; screen /settings; overlays none; recent none',
+      occurredAt: 1_700_000_000_000,
+    };
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/client-crashes',
+      headers: auth,
+      payload: stall,
+    });
+    expect(post.statusCode).toBe(200);
+    const get = await app.inject({ method: 'GET', url: '/api/client-crashes', headers: auth });
+    expect(get.json().crashes[0]).toMatchObject({ source: 'stall', surfaceId: 'srf-cc' });
+  });
+
   it('rejects unauthenticated and malformed reports', async () => {
     const { app, auth } = await boot();
     const anon = await app.inject({ method: 'POST', url: '/api/client-crashes', payload: report });

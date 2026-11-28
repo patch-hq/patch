@@ -6,13 +6,16 @@
 // while it is blocked, so the context is also saved to the session marker as it
 // changes: a freeze that never recovers is then named on the next launch.
 //
-// Logging only. Nothing here changes behaviour.
+// A stall over REPORT_STALL_MS that recovers is also handed to `onLongStall`, so
+// it reaches the host log without anyone reading the phone (crashReport.ts).
 
 import { AppState } from 'react-native';
 import { logExit, noteContext } from './exitLog';
 
 const TICK_MS = 500;
 const STALL_MS = 2_000;
+/** A stall this long is reported off the phone as well as logged on it. */
+export const REPORT_STALL_MS = 10_000;
 const MAX_CRUMBS = 8;
 
 let route = '';
@@ -55,7 +58,7 @@ export function describeContext(): string {
 }
 
 /** Start ticking. Returns a teardown. */
-export function startStallWatchdog(): () => void {
+export function startStallWatchdog(onLongStall: (detail: string, at: number) => void): () => void {
   let last = Date.now();
   let saved = '';
   const timer = setInterval(() => {
@@ -64,11 +67,13 @@ export function startStallWatchdog(): () => void {
     last = now;
     const context = describeContext();
     if (AppState.currentState === 'active' && gap - TICK_MS >= STALL_MS) {
-      logExit(
-        'stall',
-        `JS thread blocked for ${((gap - TICK_MS) / 1000).toFixed(1)}s; ${context}`.slice(0, 600),
-        now,
+      const blocked = gap - TICK_MS;
+      const detail = `JS thread blocked for ${(blocked / 1000).toFixed(1)}s; ${context}`.slice(
+        0,
+        600,
       );
+      logExit('stall', detail, now);
+      if (blocked >= REPORT_STALL_MS) onLongStall(detail, now);
     }
     if (context !== saved) {
       saved = context;
