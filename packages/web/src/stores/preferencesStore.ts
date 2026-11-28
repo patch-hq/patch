@@ -34,6 +34,29 @@ interface PreferencesState {
   update(patch: Partial<AccountPreferences>): Promise<void>;
 }
 
+/**
+ * Same value regardless of object key order: the server re-emits an object in
+ * its schema's key order, so a nested setting (voiceAgent) sent in another
+ * order is still the one that was saved. An absent key equals an undefined one.
+ */
+export function sameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((v, i) => sameValue(v, b[i]))
+    );
+  }
+  if (typeof a === 'object' && a !== null && typeof b === 'object' && b !== null) {
+    const ao = a as Record<string, unknown>;
+    const bo = b as Record<string, unknown>;
+    const keys = new Set([...Object.keys(ao), ...Object.keys(bo)]);
+    return [...keys].every((k) => sameValue(ao[k], bo[k]));
+  }
+  return a === b;
+}
+
 export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   preferences: DEFAULT_PREFERENCES,
   loaded: false,
@@ -71,7 +94,7 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
     // NO FALLBACK: a save the server did not commit as asked is a failure, not a success.
     for (const [key, want] of Object.entries(patch)) {
       const got = (preferences as unknown as Record<string, unknown>)[key];
-      if (JSON.stringify(got) !== JSON.stringify(want)) {
+      if (!sameValue(got, want)) {
         throw new Error(`the server did not save ${key}`);
       }
     }
