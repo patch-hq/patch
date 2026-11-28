@@ -6041,6 +6041,8 @@ export class Daemon {
     if (state.status === 'archived') await this.setArchived(chatId, false);
     if (state.hidden) await this.setHidden(chatId, false);
     if (!moved) this.emitState(chatId);
+    // A question is the chat needing a person: it ends an until-complete snooze now.
+    if (kind === 'question') this.wakeIfSnoozeComplete(chatId);
   }
 
   /**
@@ -6087,6 +6089,26 @@ export class Daemon {
     await this.setSnoozed(chatId, restore.until, {
       setId: restore.setId,
       ...(restore.waitForSet ? { waitForSet: true } : {}),
+    });
+  }
+
+  /**
+   * A question or permission that woke a snoozed chat has been dealt with (a
+   * turn is running and nothing is waiting on the person): the chat goes back
+   * into the snooze it was woken from, so it leaves the list again by itself.
+   */
+  private resumeSnoozeAfterAnswer(chatId: string): void {
+    const state = this.chatState.get(chatId);
+    if (!state || this.isAskingQuestion(state)) return;
+    if (this.aggregateActivity(chatId) === 'awaiting-permission') return;
+    const restore = this.snoozeToRestore(chatId);
+    if (restore === null) return;
+    if (restore.until === SNOOZE_UNTIL_COMPLETE && !this.hasWorkToComplete(chatId)) return;
+    void this.setSnoozed(chatId, restore.until, {
+      setId: restore.setId,
+      ...(restore.waitForSet ? { waitForSet: true } : {}),
+    }).catch((err) => {
+      this.opts.logger.warn({ chatId, err }, 'could not return the chat to its snooze');
     });
   }
 
@@ -6957,12 +6979,7 @@ export class Daemon {
     // A chat already waiting on a person when it was snoozed (a goal parked on
     // something in the world) would otherwise wake the moment it is snoozed.
     // Only a stop that begins after the snooze counts.
-    // A chat with a goal is waiting on that goal, and only the goal ending
-    // brings it back: a declared question (the goal judge's own "waiting on
-    // you" included) must not end the snooze.
-    const waiting =
-      activity === 'awaiting-permission' ||
-      ((state.goal ?? null) === null && this.isAskingQuestion(state));
+    const waiting = activity === 'awaiting-permission' || this.isAskingQuestion(state);
     if (!waiting) this.snoozeWaitingAtStart.delete(chatId);
     const needsPerson =
       (waiting && !this.snoozeWaitingAtStart.has(chatId)) ||
@@ -10970,6 +10987,7 @@ export class Daemon {
     }
     this.cancelGoalHoldTimer(chatId);
     this.emitState(chatId);
+    this.resumeSnoozeAfterAnswer(chatId);
 
     // Record the turn as in-flight BEFORE the SDK is asked to run it. Everything
     // above this line is a preflight that either ran to completion or refused
