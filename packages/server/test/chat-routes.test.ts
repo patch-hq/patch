@@ -1457,6 +1457,36 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('POST /api/chats/:id/rotate refuses a thread mid-turn with 409 and says why', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'thread_manager', folder: '/m' });
+      hostLink.emit({
+        type: 'chat.turn_started',
+        chatId: 'thread_manager',
+        turnId: 't1',
+        seq: -1,
+        at: 0,
+      });
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/thread_manager/rotate',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { carry: false },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toEqual({
+        error:
+          'Cannot clear the Manager while it is working. Try again when the turn has finished.',
+      });
+      expect(hostLink.sent.some((s) => s.event.type === 'chat.rotate_request')).toBe(false);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('POST /api/chats/:id/rotate refuses a non-special thread with 403', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();

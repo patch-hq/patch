@@ -610,6 +610,23 @@ describe('Manager page', () => {
     );
   });
 
+  it('Clear refused while the Manager is working shows the server’s reason', async () => {
+    const message =
+      'Cannot clear the Manager while it is working. Try again when the turn has finished.';
+    vi.mocked(api.getChatSession).mockResolvedValue({
+      session: { messages: 34, startedAt: Date.now() },
+    });
+    vi.mocked(api.rotateChat).mockRejectedValue(new Error(message));
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    await flush();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('manager-clear')).props.onPress();
+      await flush();
+    });
+    expect(__getLastAlert()).toMatchObject({ title: 'Could not clear the session', message });
+  });
+
   it('quiet hours commit a valid HH:MM on blur, and refuse anything else', async () => {
     seedSettings();
     const r = renderRN(<ManagerPage />);
