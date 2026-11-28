@@ -126,14 +126,18 @@ async function open(session: ElevenLabsAgentSession, last: { ws?: FakeWs }): Pro
   return ws;
 }
 
-const audioChunk = (samples: number, isFinal = false) => ({
+const audioChunk = (samples: number) => ({
   type: 'audio',
   audio_event: {
     audio_base_64: Buffer.from(new Int16Array(samples).fill(1000).buffer).toString('base64'),
     event_id: 1,
-    is_final: isFinal,
   },
 });
+/** The end of a reply (asked for in the agent's `client_events`). */
+const complete = {
+  type: 'agent_response_complete',
+  agent_response_complete_event: { event_id: 1 },
+};
 const transcript = (text: string) => ({
   type: 'user_transcript',
   user_transcription_event: { user_transcript: text },
@@ -178,6 +182,19 @@ describe('ElevenLabsAgentSession — provisioning', () => {
     );
     expect(agent['conversation_config'].agent.first_message).toBe('');
     expect(agent['conversation_config'].conversation.max_duration_seconds).toBe(3600);
+    // The end of a reply is only sent when asked for, and naming events replaces
+    // the default set, so every event the session handles is named.
+    expect(agent['conversation_config'].conversation.client_events).toEqual([
+      'conversation_initiation_metadata',
+      'ping',
+      'audio',
+      'interruption',
+      'user_transcript',
+      'agent_response',
+      'agent_response_correction',
+      'agent_response_complete',
+      'client_tool_call',
+    ]);
     expect(agent['conversation_config'].asr.user_input_audio_format).toBe('pcm_16000');
     expect(agent['conversation_config'].tts.agent_output_audio_format).toBe('pcm_24000');
     expect(rest.some((r) => r.path.includes('get-signed-url?agent_id=agent-1'))).toBe(true);
@@ -284,7 +301,8 @@ describe('ElevenLabsAgentSession — conversation', () => {
     ws.serverSend(response('Ten past two.'));
     ws.serverSend(audioChunk(480));
     expect(session.getState()).toBe('speaking');
-    ws.serverSend(audioChunk(480, true));
+    ws.serverSend(audioChunk(480));
+    ws.serverSend(complete);
     expect(binary.map((b) => b.length)).toEqual([480, 480]);
     expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(1);
     expect(session.getState()).toBe('listening');
@@ -303,40 +321,25 @@ describe('ElevenLabsAgentSession — conversation', () => {
     });
   });
 
-  test('with no final marker, a reply ends once its text is in and the audio goes quiet', async () => {
-    const { deps, events, last } = makeDeps({ replyQuietMs: 20 });
+  test('a reply stays open until agent_response_complete, whatever the text and gaps', async () => {
+    const { deps, events, last } = makeDeps();
     const session = new ElevenLabsAgentSession(makeInit(), deps);
     const ws = await open(session, last);
-    ws.serverSend(transcript('say banana'));
+    ws.serverSend(transcript('tell me a story'));
     ws.serverSend(audioChunk(480));
-    // Audio alone, however quiet, is not the end: the text has not arrived.
-    await new Promise((r) => setTimeout(r, 60));
+    ws.serverSend(response('Once upon a time.'));
+    await new Promise((r) => setTimeout(r, 100));
+    ws.serverSend(audioChunk(480));
+    await new Promise((r) => setTimeout(r, 50));
     expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(0);
     expect(session.getState()).toBe('speaking');
-    ws.serverSend(audioChunk(480));
-    ws.serverSend(response('Banana!'));
+    ws.serverSend(complete);
     await vi.waitFor(() =>
       expect(events.filter((e) => e.type === 'audio.tts_end')).toEqual([
         { type: 'audio.tts_end', sessionId: 'sess-1' },
       ]),
     );
     expect(session.getState()).toBe('listening');
-  });
-
-  test('audio still arriving after the text holds the reply open', async () => {
-    const { deps, events, last } = makeDeps({ replyQuietMs: 40 });
-    const session = new ElevenLabsAgentSession(makeInit(), deps);
-    const ws = await open(session, last);
-    ws.serverSend(transcript('tell me a story'));
-    ws.serverSend(response('Once upon a time.'));
-    for (let i = 0; i < 4; i++) {
-      ws.serverSend(audioChunk(480));
-      await new Promise((r) => setTimeout(r, 20));
-    }
-    expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(0);
-    await vi.waitFor(() =>
-      expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(1),
-    );
   });
 
   test('agent_response_complete ends the reply at once', async () => {
@@ -359,7 +362,8 @@ describe('ElevenLabsAgentSession — conversation', () => {
     const ws = await open(session, last);
     ws.serverSend(transcript('say banana'));
     ws.serverSend(response('[happy] Banana! [laughs]'));
-    ws.serverSend(audioChunk(480, true));
+    ws.serverSend(audioChunk(480));
+    ws.serverSend(complete);
     await vi.waitFor(() => expect(timeline.log).toContain('reply:chat-1:Banana!'));
   });
 
@@ -425,7 +429,8 @@ describe('ElevenLabsAgentSession — conversation', () => {
     ws.serverSend(audioChunk(480));
     session.pushMessage("Answer from the chat's agent: 14:05", { handoffSettled: true });
     expect(ws.ofType('user_message')).toHaveLength(0);
-    ws.serverSend(audioChunk(480, true));
+    ws.serverSend(audioChunk(480));
+    ws.serverSend(complete);
     expect(ws.ofType('user_message')).toEqual([
       { type: 'user_message', text: "Answer from the chat's agent: 14:05" },
     ]);
@@ -529,7 +534,8 @@ describe('ElevenLabsAgentSession — hands-free address gating', () => {
     const ws = await open(session, last);
     ws.serverSend(transcript('pass me the salt'));
     ws.serverSend(response('Sure, here you go'));
-    ws.serverSend(audioChunk(480, true));
+    ws.serverSend(audioChunk(480));
+    ws.serverSend(complete);
     expect(events).toContainEqual({
       type: 'audio.transcript_final',
       sessionId: 'sess-1',
@@ -546,11 +552,13 @@ describe('ElevenLabsAgentSession — hands-free address gating', () => {
     const session = new ElevenLabsAgentSession(makeInit(handsFree()), deps);
     const ws = await open(session, last);
     ws.serverSend(transcript('pass me the salt'));
-    ws.serverSend(audioChunk(480, true));
+    ws.serverSend(audioChunk(480));
+    ws.serverSend(complete);
     expect(binary).toHaveLength(0);
     ws.serverSend(transcript('Patch what time is it'));
     ws.serverSend(response('Two.'));
-    ws.serverSend(audioChunk(480, true));
+    ws.serverSend(audioChunk(480));
+    ws.serverSend(complete);
     expect(binary).toHaveLength(1);
     expect(timeline.log[0]).toBe('user:chat-1:Patch what time is it');
     expect(session.stats().turns).toBe(1);

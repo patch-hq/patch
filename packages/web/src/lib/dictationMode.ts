@@ -18,6 +18,7 @@ import {
 } from '@patch/wire/utterance-segmenter';
 import { startRecording, type VoiceRecording } from './voiceRecorder.js';
 import type { DictationPreview, DictationPreviewCallbacks } from './dictationPreview.js';
+import { TURN_CHECK_PAUSE_MS, TURN_COMPLETE } from '@patch/wire/smart-turn';
 
 const SAMPLE_RATE = 16000;
 
@@ -37,11 +38,6 @@ export interface DictationModeDeps {
    */
   openPreview?: (callbacks: DictationPreviewCallbacks) => DictationPreview;
 }
-
-/** Quiet this long after speech asks the turn check. */
-export const TURN_CHECK_PAUSE_MS = 700;
-/** Smart Turn's own decision threshold. */
-export const TURN_COMPLETE = 0.5;
 
 export interface DictationModeCallbacks {
   /** A finished utterance's text, non-empty and trimmed. */

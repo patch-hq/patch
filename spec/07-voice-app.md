@@ -238,6 +238,57 @@ The device a call is on — phone, web or desktop — records, for each call: wh
 
 Every fixed time in a call is either a setting or carries its reason beside it here. Anything a real signal can tell — the host's heartbeat, the provider's own events, the device's audio and headphone events — is taken from that signal, not timed.
 
+Taken from a signal, not timed:
+
+- A gone device. The host ends a session when it has heard nothing from the device for the heartbeat's 3 seconds, the same rule the device judges the host by. Only frames count: a call's device echoes every heartbeat, and every other session streams its microphone for as long as it is open. A WebSocket ping proves nothing, because it is answered by the server's relay, not the device.
+- The end of a voice agent's reply: the provider's own end of reply (Gemini's turn complete, OpenAI's response done, ElevenLabs' `agent_response_complete`, which the agent is created to send). The end of its playback on the device is the reply's audio length from its first chunk.
+- Hanging up after the voice agent's goodbye: when its reply has ended and the device has played it out, bounded at 15 seconds so a provider that never goes quiet cannot hold open a call the agent asked to end.
+- Headphones out and back in, audio focus, the output device going away: the device's own events (§ Pause).
+
+Settings: Send anyway after a pause of (dictation and direct calls, § Dictation mode), Detect when I've finished, and Pause when quiet for (§ Pause).
+
+Fixed, with the reason:
+
+| Time                                          | What                                                                                                 | Why it is fixed                                                                                           |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 1 s / 3 s                                     | Heartbeat, and nothing heard for this long is a lost line (both directions)                          | One late frame is not a drop; three missed ones are                                                       |
+| 1, 2, 4, 8, 15, 20, 30, 30 s, then every 30 s | Redialling a dropped call                                                                            | About two minutes rides out a release restarting the server and host                                      |
+| 15 s                                          | A dial the host has not acknowledged has failed                                                      | Long enough for a provider's session to open over a slow network                                          |
+| 12 s                                          | ElevenLabs agent created, connected and started                                                      | Under the 15 s above, so the stage that stalled is named                                                  |
+| 8 s                                           | A tunnelled audio session waits for its host's bridge                                                | Under the 15 s above, so `host_unreachable` lands first                                                   |
+| 5 min                                         | A voice token, and the server's route for its session                                                | One dial; a token is never reused                                                                         |
+| 1 h                                           | ElevenLabs call limit (`max_duration_seconds`)                                                       | Left unset, ElevenLabs cuts calls at about 10 minutes; one hour bounds a call left open                   |
+| 1.8 s                                         | Silence that ends a turn on Gemini (`silenceDurationMs`, and the hands-free gate's end of utterance) | Gemini's default ends the turn on every "um"                                                              |
+| 400 ms                                        | A spoken hand-off claim waits for its tool call before it counts as false (Gemini)                   | The tool call can land just after the turn that spoke the words completes                                 |
+| 30 s                                          | Hands-free follow-up window (§ Session modes)                                                        | The spec's rule for answering without the address word                                                    |
+| 0.4 s / 60 s                                  | Hands-free gate: audio kept from before speech; an utterance held with no end                        | So the first word is not clipped; so a stuck VAD cannot hold audio for ever                               |
+| 0.5 s                                         | Silero VAD hangover before it reports an end of utterance                                            | The VAD's own smoothing, so one quiet frame is not an end                                                 |
+| 5 s                                           | A microphone delivering only digital silence is reported (§ Provider keys and failures)              | Any working microphone delivers a non-zero sample well within that                                        |
+| 3 s                                           | An opened microphone on the phone that has sent no frame is reported dead                            | The native capture delivers its first frame in well under a second                                        |
+| 0.7 s                                         | A pause that asks Smart Turn (§ Dictation mode)                                                      | Short enough to answer quickly, long enough not to ask on every gap                                       |
+| 0.3 s / 2 min                                 | Shortest utterance; longest without a pause (§ Dictation mode)                                       | A blip is not speech; an utterance is cut rather than held for ever                                       |
+| 2 s                                           | A stock phrase over less speech than this is dropped as invented                                     | Speech models invent these from silence and noise                                                         |
+| 220 ms                                        | A hotkey press shorter than this is a tap (§ 1. Voice note)                                          | A chord is struck faster than anyone speaks                                                               |
+| 8 s                                           | A heard-but-not-sent utterance stays on the call bar                                                 | Feedback, then the bar says what it is waiting for again                                                  |
+| 1 s of new audio, 0.5 s first                 | Interim transcript passes on Whisper (§ Live transcript); 0.5 s on Parakeet                          | Each pass is a whole transcription; Parakeet costs nothing per pass                                       |
+| 0.3 s                                         | Deepgram `endpointing` (quiet that ends a dictated phrase)                                           | Deepgram's own end of phrase; Patch tidies each phrase after it                                           |
+| 0.5 s / 25 s                                  | Parakeet streaming: quiet that ends a phrase; a phrase with no pause                                 | The same, on the host's own streaming model                                                               |
+| 200 ms                                        | ElevenLabs Scribe audio is batched into messages this long                                           | Scribe refuses audio sent in many tiny messages                                                           |
+| 1.25× after 1 s                               | Backlogged audio is paced to Scribe                                                                  | Scribe ends a session when audio arrives faster than real time                                            |
+| 3 s                                           | Deepgram's `Finalize` and Scribe's commit wait for the last words                                    | Deepgram documents that it may not answer when nothing is left to finalise; the words already heard stand |
+| 10 s, 15 s                                    | The host's, then the phone's, wait for a streaming recogniser's last words                           | Request bound; a recogniser that never finishes is an error the user sees                                 |
+| 10 s ×3                                       | ElevenLabs live dictation restarts: a stream that dies this soon counts against three                | A stream crosses Scribe's session limit routinely; only one that keeps dying at once fails                |
+| 30 s, 1 s                                     | Phone live dictation redials after a server restart, every second, for this long                     | A release restart takes seconds; past that it is a failure                                                |
+| 20 s / 120 s / 140 s                          | Groq: one utterance, one long clip, and the clip's whole deadline with retries                       | Request bound                                                                                             |
+| 30 s                                          | Direct call cloud speech through the host                                                            | Request bound; one utterance or one sentence answers in a second or two                                   |
+| 10 s                                          | Turn check through the host                                                                          | A host too old to answer never does                                                                       |
+| 45 s                                          | Dictation finish, web and phone                                                                      | Covers the host's own waits for the last tidy-up                                                          |
+| 5 s                                           | The phone's microphone confirming it stopped                                                         | Request bound                                                                                             |
+| 30 s                                          | The start context's catch-up job                                                                     | A hung job never leaks a warm session                                                                     |
+| 1 s                                           | The host closing: stragglers that never answer the close handshake                                   | A vanished phone never answers it                                                                         |
+
+Test stacks only: the mock Kokoro's 80 ms between chunks and the injected transcript's 60 ms between words, so tests can see speaking and live words.
+
 ## Turn semantics (host speech)
 
 | Event                 | Direction            | Handling                                                                                            |

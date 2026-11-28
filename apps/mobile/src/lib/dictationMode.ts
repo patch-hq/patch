@@ -19,6 +19,7 @@ import { api } from '../api/rest';
 import { startMicCapture, stopMicCapture } from './voiceMic';
 import { startDictationPreview, type DictationPreview } from './dictationPreview';
 import { encodePcm16Wav, encodeBase64 } from './pcmWav';
+import { TURN_CHECK_PAUSE_MS, TURN_COMPLETE } from '@patch/wire/smart-turn';
 
 const SAMPLE_RATE = 16000;
 
@@ -36,11 +37,6 @@ export interface DictationModeHandle {
   /** Close the mic. Speech not yet cut into an utterance is dropped. */
   stop(): Promise<void>;
 }
-
-/** Quiet this long after speech asks the turn check. */
-export const TURN_CHECK_PAUSE_MS = 700;
-/** Smart Turn's own decision threshold. */
-export const TURN_COMPLETE = 0.5;
 
 export interface DictationModeOptions {
   segmenter?: UtteranceSegmenterOptions;

@@ -1,47 +1,40 @@
-// Dead-peer detection for an audio WebSocket. A device that resets or loses
-// Wi-Fi never sends a close frame, so the socket (and the session on it) would
-// stay open forever. Anything heard from the peer — a frame or a pong — counts
-// as alive; a peer silent for `timeoutMs` has its socket terminated, which runs
-// the normal close path. A ping goes out every `pingIntervalMs` so a peer that
-// is connected but legitimately quiet still answers.
+// A gone peer on an audio WebSocket (spec/07 § A dropped call comes back). A
+// phone that loses its network or is killed never sends a close frame, so the
+// socket (and the session on it) would stay open. The host judges the peer by
+// what it hears from it, on the same rule a surface judges the host: nothing
+// for `HEARTBEAT_LOST_AFTER_MS` and the peer is gone, and its socket is
+// terminated, which runs the normal close path.
+//
+// Only frames count. A WebSocket ping is answered by whatever holds the other
+// end of this socket, and that is usually the server's relay (or this host's
+// own tunnel bridge), not the device, so a pong says nothing about the device.
+// A live peer always has something to send: a call's surface echoes the call
+// heartbeat every second (call-heartbeat.ts), and every other session streams
+// its microphone for as long as it is open.
 
 import type WebSocket from 'ws';
-
-/** No frame or pong for this long ends the session. */
-export const DEAD_PEER_TIMEOUT_MS = 45_000;
-/** How often the peer is pinged (and the silence checked). */
-export const PING_INTERVAL_MS = 15_000;
+import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_LOST_AFTER_MS } from '@patch/wire/audio';
 
 export interface LivenessOptions {
-  timeoutMs?: number;
-  pingIntervalMs?: number;
   /** Called just before the socket is terminated. */
-  onDead?: (silentMs: number) => void;
+  onGone?: (silentMs: number) => void;
+  now?: () => number;
 }
 
 /** Start watching `ws`; stops itself when the socket closes. */
 export function watchPeerLiveness(ws: WebSocket, opts: LivenessOptions = {}): void {
-  const timeoutMs = opts.timeoutMs ?? DEAD_PEER_TIMEOUT_MS;
-  const pingMs = opts.pingIntervalMs ?? PING_INTERVAL_MS;
-  let lastHeard = Date.now();
-  const heard = (): void => {
-    lastHeard = Date.now();
-  };
-  ws.on('message', heard);
-  ws.on('pong', heard);
+  const now = opts.now ?? Date.now;
+  let lastHeard = now();
+  ws.on('message', () => {
+    lastHeard = now();
+  });
   const timer = setInterval(() => {
-    const silent = Date.now() - lastHeard;
-    if (silent >= timeoutMs) {
-      opts.onDead?.(silent);
-      ws.terminate();
-      return;
-    }
-    try {
-      ws.ping();
-    } catch {
-      ws.terminate();
-    }
-  }, pingMs);
+    const silent = now() - lastHeard;
+    if (silent < HEARTBEAT_LOST_AFTER_MS) return;
+    clearInterval(timer);
+    opts.onGone?.(silent);
+    ws.terminate();
+  }, HEARTBEAT_INTERVAL_MS);
   timer.unref();
   ws.once('close', () => clearInterval(timer));
 }
