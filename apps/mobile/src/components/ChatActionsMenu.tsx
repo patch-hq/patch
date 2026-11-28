@@ -28,7 +28,7 @@ import { isReservedSpecialThread } from '@patch/wire';
 import { AnchoredMenu } from './AnchoredMenu';
 import {
   showChatSnoozeSheet,
-  applySnooze,
+  unsnoozeChat,
   showHiddenChat,
   toggleArchive,
 } from './ChatLongPressSheet';
@@ -147,7 +147,7 @@ export function ChatActionsMenu({
         if (row) showChatSnoozeSheet(row);
         return;
       case 'Unsnooze chat':
-        applySnooze(chatId, null);
+        unsnoozeChat(chatId);
         return;
       case 'Pin chat':
       case 'Unpin chat': {

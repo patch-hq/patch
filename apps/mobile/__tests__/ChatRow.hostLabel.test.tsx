@@ -16,7 +16,7 @@ vi.mock('../src/components/ChatLongPressSheet', () => ({
   showHiddenChat: vi.fn(),
   toggleArchive: vi.fn(),
   togglePin: vi.fn(),
-  applySnooze: vi.fn(),
+  unsnoozeChat: vi.fn(),
 }));
 
 function makeRow(chatId: string, hostId: string, name = 'Fix login'): ChatRowT {
