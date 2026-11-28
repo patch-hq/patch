@@ -374,7 +374,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_list_chats',
     category: 'patch',
     description: 'Lists every chat the user has, across every host on the account.',
-    params: "archived?: 'only' | 'include'",
+    params: "scope?: 'archived' | 'all'",
   },
   {
     name: patchToolId('patch_search_chats'),
