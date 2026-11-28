@@ -247,6 +247,33 @@ describe('NotificationRouter — push channel', () => {
     expect(push.sent[0]?.tokens).toEqual(['tok-1']);
   });
 
+  it('urgent with no channel reaches the desktop and the phone both, even while a computer is active', async () => {
+    const { dir, registry } = makeRegistryDir();
+    const presence = new PresenceTracker();
+    presence.online(ACCOUNT.publicKey, 'srf-1', 'desktop', 1_700_000_000_000);
+    presence.heartbeat(ACCOUNT.publicKey, 'srf-1', 1_700_000_000_000);
+    registry.registerPushToken({
+      surfaceId: 'srf-2',
+      accountId: ACCOUNT.publicKey,
+      token: 'tok-1',
+      registeredAt: 1,
+    });
+    const wsHub = makeFakeWsHub();
+    const push = fakePush();
+    const router = new NotificationRouter({
+      logger: silent,
+      registry,
+      presence,
+      wsHub: wsHub as never,
+      dataDir: dir,
+      pushBackend: push.backend,
+      nowMs: () => 1_700_000_010_000,
+    });
+    await router.route({ type: 'notify', chatId: 'c1', message: 'urgent!', priority: 'urgent' });
+    expect(push.sent).toHaveLength(1);
+    expect(wsHub.delivered.length).toBeGreaterThan(0);
+  });
+
   it('delivers a non-urgent push when no surface heartbeat is within 30s', async () => {
     const { dir, registry } = makeRegistryDir();
     const presence = new PresenceTracker();

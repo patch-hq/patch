@@ -188,6 +188,15 @@ export class NotificationRouter {
       );
       return;
     }
+    // Urgent is the one rung that is never left to presence: the user asked to
+    // be reached, so it goes to the computer and the phone both, even while
+    // they are at one of them.
+    if (!event.channel && event.priority === 'urgent') {
+      this.deps.logger.info({ chatId: event.chatId }, 'notify urgent: desktop and push both');
+      await this.route({ ...event, channel: 'desktop' }, opts);
+      await this.route({ ...event, channel: 'push' }, opts);
+      return;
+    }
     // No channel means the agent said only what it had to say and how much it
     // matters, which is all it can know. Where that lands is a fact about where
     // the user is: at a computer, the toast is in front of him and a push would
