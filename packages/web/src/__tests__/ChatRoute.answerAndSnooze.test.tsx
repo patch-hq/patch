@@ -99,7 +99,7 @@ describe('Send answer and snooze', () => {
       },
     }));
     useChatStore.getState().setActiveChat('c1');
-    const ws = { send: vi.fn(), requestReplay() {} } as never;
+    const ws = { send: vi.fn(), requestReplay() {}, requestHistory() {} } as never;
     render(
       <MemoryRouter initialEntries={['/chats/c1']}>
         <Where />
