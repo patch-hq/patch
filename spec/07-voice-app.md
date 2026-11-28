@@ -121,6 +121,14 @@ Every call is costed when it ends, on every kind of call:
 - The engine: provider and model, the session's length, and the tokens it used by kind (text and audio, in and out) as the provider reports them. A direct call or host-speech conversation counts what its cloud speech engines were sent (audio seconds, characters); on-device engines cost nothing.
 - A cost in US dollars for the engine, from a fixed per-model price table on the host. The chat agent's turns a call runs (hand-offs, or every turn of a direct call) are the chat's own and are not costed, and neither is the start context's catch-up, a small job like any other: they ride on the subscription, and a call's expense is the voice alone. A model missing from the table shows its tokens and no price rather than a guess. An engine that reports no token usage, or an ElevenLabs balance that cannot be read, is left off the line rather than announced.
 
+A call's context is kept bounded, so cost per turn does not climb as the call runs (every turn and every pushed answer lands in the provider's conversation, which the provider bills again each turn). Each provider's own mechanism does it, never a summariser of Patch's: the start context (the instructions) stays and the oldest turns roll off.
+
+- Gemini: sliding-window context compression (`contextWindowCompression.slidingWindow`), which takes no number; Google's default trigger and target apply.
+- OpenAI: `truncation` of type `retention_ratio`, keeping 0.8 when it truncates and capping a response's input after the instructions at 8,000 tokens. OpenAI requires numbers here; they are constants of the host, not a user setting.
+- ElevenLabs: Agents has no context setting and reports no per-turn size, so nothing is trimmed or logged; the call is billed by the minute plus the LLM's own charge.
+
+Where the provider reports it (Gemini's prompt tokens, OpenAI's response input tokens), the host logs the context size each turn.
+
 The summary lands in the chat as one quiet line when the session ends — `Call 0:52 · Gemini Flash · $0.012`, at the moment the call ends, with nothing to wait for. The host keeps every session's costing on disk and reports this month's and all-time totals per host on `host.host.voiceUsage` — calls, tokens (Gemini and OpenAI, as the providers reported them) and ElevenLabs credits (as ElevenLabs charged them, plus speech at its per-character rate), and the ElevenLabs plan's credits used this period as last read. Settings → Voice calls → Usage shows them summed across every host, in those units rather than dollars.
 
 ## Direct calls

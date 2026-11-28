@@ -70,6 +70,7 @@ import type { VoiceTimeline } from './voice-session-like.js';
 import { SpokenReply } from './spokenReply.js';
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
 import { addTokens, ZERO_TOKENS, type EngineCosting, type EngineTokens } from './voiceCost.js';
+import { OPENAI_TRUNCATION } from './voiceContext.js';
 import {
   DEFAULT_ADDRESS_WORD,
   isAddressed,
@@ -145,6 +146,7 @@ export interface OpenAIRealtimeDeps {
 }
 
 interface RealtimeUsage {
+  input_tokens?: number;
   input_token_details?: {
     text_tokens?: number;
     audio_tokens?: number;
@@ -431,6 +433,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       type: 'realtime',
       ...this.speakerConfig(),
       output_modalities: ['audio'],
+      truncation: OPENAI_TRUNCATION,
       audio: {
         input: {
           format: { type: 'audio/pcm', rate: 24000 },
@@ -912,7 +915,14 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     this.responseHadToolCall = false;
     const wasCut = this.replyCut;
     this.replyCut = false;
-    if (response.usage) this.tokens = addTokens(this.tokens, realtimeUsageTokens(response.usage));
+    if (response.usage) {
+      this.tokens = addTokens(this.tokens, realtimeUsageTokens(response.usage));
+      // What the provider held for this response, so cost growth shows in the log.
+      this.deps.logger.info(
+        { sessionId: this.init.sessionId, contextTokens: response.usage.input_tokens ?? 0 },
+        'openai-realtime: context',
+      );
+    }
     // Reply text still held for words that never settled is written anyway,
     // rather than lost.
     if (!this.awaitingUserWords) this.finishReply();

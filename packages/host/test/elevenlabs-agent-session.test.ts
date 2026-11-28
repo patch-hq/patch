@@ -187,6 +187,8 @@ describe('ElevenLabsAgentSession — provisioning', () => {
       `Be this chat.\n\n${FAKE_START_CONTEXT}`,
     );
     expect(agent['conversation_config'].agent.first_message).toBe('');
+    // ElevenLabs Agents has no context setting (voiceContext.ts): nothing is sent to bound it.
+    expect(JSON.stringify(agent)).not.toMatch(/truncat|compress|context_window|retention/i);
     expect(agent['conversation_config'].conversation.max_duration_seconds).toBe(3600);
     // The end of a reply is only sent when asked for, and naming events replaces
     // the default set, so every event the session handles is named.

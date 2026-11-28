@@ -181,6 +181,13 @@ describe('GeminiLiveSession — connect + setup', () => {
     expect(first.setup.systemInstruction.parts[0]!.text).toMatch(/unfinished|fragment/i);
   });
 
+  test("bounds the live context with Gemini's own sliding-window compression", async () => {
+    const { deps, lastWs } = makeDeps();
+    const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
+    const [first] = ws.sentJson() as [{ setup: { contextWindowCompression: unknown } }];
+    expect(first.setup.contextWindowCompression).toEqual({ slidingWindow: {} });
+  });
+
   test('sends a setup message naming the dispatch tool and the default model', async () => {
     const { deps, lastWs } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);

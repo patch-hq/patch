@@ -67,6 +67,7 @@ import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import { SpokenReply } from './spokenReply.js';
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
 import { addTokens, ZERO_TOKENS, type EngineCosting, type EngineTokens } from './voiceCost.js';
+import { GEMINI_CONTEXT_COMPRESSION } from './voiceContext.js';
 import {
   PASS_TO_AGENT_TOOL_NAME,
   SEND_TO_CHAT_TOOL_NAME,
@@ -164,6 +165,7 @@ interface GeminiSetupMessage {
     };
     inputAudioTranscription: Record<string, never>;
     outputAudioTranscription: Record<string, never>;
+    contextWindowCompression: typeof GEMINI_CONTEXT_COMPRESSION;
   };
 }
 interface GeminiFunctionDeclaration {
@@ -307,6 +309,7 @@ function buildSetupMessage(
       },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
+      contextWindowCompression: GEMINI_CONTEXT_COMPRESSION,
     },
   };
   return { setup: mergeConfig(message.setup, sound) };
@@ -378,6 +381,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
   private relayHadOutput = false;
   // --- usage (spec/07 § Call cost) ---
   private turnUsage?: EngineTokens;
+  private turnContextTokens = 0;
   private tokens: EngineTokens = ZERO_TOKENS;
   /** The turn called a tool: its speech comes with the tool's answer, in the next turn. */
   private turnHadToolCall = false;
@@ -752,7 +756,10 @@ export class GeminiLiveSession implements VoiceSessionLike {
       (k) => !['serverContent', 'usageMetadata', 'toolCall', 'toolCallCancellation'].includes(k),
     );
     if (unhandled.length > 0) this.log('server message', { keys: unhandled });
-    if (msg.usageMetadata) this.turnUsage = geminiUsageTokens(msg.usageMetadata);
+    if (msg.usageMetadata) {
+      this.turnUsage = geminiUsageTokens(msg.usageMetadata);
+      this.turnContextTokens = msg.usageMetadata.promptTokenCount ?? 0;
+    }
     if (msg.toolCall?.functionCalls) {
       this.log('tool call', {
         calls: msg.toolCall.functionCalls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
@@ -932,6 +939,8 @@ export class GeminiLiveSession implements VoiceSessionLike {
     if (this.turnHadInput) this.turns += 1;
     this.finishReply();
     if (this.turnUsage) {
+      // What the provider held for this turn, so cost growth shows in the log.
+      this.log('context', { seq: this.turnSeq, contextTokens: this.turnContextTokens });
       this.tokens = addTokens(this.tokens, this.turnUsage);
       this.turnUsage = undefined;
     }
