@@ -511,6 +511,16 @@ describe('PaneArea — the + menu', () => {
   const labels = (menu: HTMLElement): (string | null)[] =>
     [...menu.querySelectorAll('[role="menuitem"]')].map((n) => n.textContent);
 
+  it('leaves Triage out of the pages while experimental features are off', () => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: false },
+    });
+    seedChats(['a']);
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    expect(labels(plusMenu())).not.toContain('Triage');
+  });
+
   it('lists this chat’s things, then other chats, then pages', () => {
     seedChats(['a', 'b']);
     useLayoutStore.getState().showChat('a');
