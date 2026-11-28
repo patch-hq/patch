@@ -244,7 +244,7 @@ describe('WsHub — handleHello edge cases needing direct construction', () => {
         } satisfies WireEvent),
       ),
     );
-    fs.emit('close'); // the browser went away mid-verification
+    fs.emit('close', 1006, Buffer.alloc(0)); // the browser went away mid-verification
     await new Promise((r) => setTimeout(r, 50));
     expect(hub.connectedSurfaceIds()).toEqual([]);
     const accountId = registry.getAccount()!.accountId;
