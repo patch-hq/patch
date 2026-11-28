@@ -6041,8 +6041,11 @@ export class Daemon {
     if (state.status === 'archived') await this.setArchived(chatId, false);
     if (state.hidden) await this.setHidden(chatId, false);
     if (!moved) this.emitState(chatId);
-    // A question is the chat needing a person: it ends an until-complete snooze now.
-    if (kind === 'question') this.wakeIfSnoozeComplete(chatId);
+    // A question or report is the chat having something to show: it ends an
+    // until-complete snooze now, whatever work is left.
+    if (this.chatState.get(chatId)?.snoozedUntil === SNOOZE_UNTIL_COMPLETE) {
+      this.wakeFromSnooze(chatId);
+    }
   }
 
   /**
@@ -6959,6 +6962,9 @@ export class Daemon {
       state?.turnRetrying === true ||
       (state?.goal ?? null) !== null ||
       (wake !== null && wake.every === undefined) ||
+      // A running patch_watch is the chat waiting for an outside event (an email
+      // reply, a build): the snooze lasts until it fires.
+      this.watch.count(chatId) > 0 ||
       this.hasRunningDelegates(chatId)
     );
   }

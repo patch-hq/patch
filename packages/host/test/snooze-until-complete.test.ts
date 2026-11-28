@@ -128,6 +128,33 @@ describe('Snooze until complete', () => {
     daemon.shutdown();
   });
 
+  it('a report wakes a snoozed chat that still has work', async () => {
+    const { backend, release } = gated();
+    const { daemon, folder } = setup(backend);
+    const id = await daemon.spawnChat({ folder });
+    await daemon.setGoal(id, 'ship it');
+    await daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    await daemon.declareStatus(id, 'report', 'Reply arrived');
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(null);
+    release();
+    daemon.shutdown();
+  });
+
+  it('a running patch_watch is work to wait for, and its end wakes the chat', async () => {
+    const { backend } = gated();
+    const { daemon, folder } = setup(backend);
+    const id = await daemon.spawnChat({ folder });
+    await expect(daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE)).rejects.toThrow(/no running work/);
+    const rec = daemon.startWatch(id, { command: 'sleep 30', description: 'w', timeoutSec: 60 });
+    await daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    expect(rec.taskId).toBeTruthy();
+    daemon.stopWatch(id, rec.taskId);
+    await sleep(300);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(null);
+    daemon.shutdown();
+  });
+
   it('the goal-blocked question is cleared when the goal runs again', async () => {
     const { backend, release } = gated();
     const { daemon, folder } = setup(backend);
