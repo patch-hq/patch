@@ -35,7 +35,7 @@ import {
   SWITCH_CHAT_TOOL_NAME,
   END_CALL_TOOL_NAME,
   switchedMessage,
-  chatReplyMessage,
+  relayPush,
   type StartContext,
   type VoiceAgentLink,
 } from './voiceAgent.js';
@@ -333,7 +333,14 @@ export class VoiceAgentCall {
           this.handoffClosed();
           return;
         }
-        this.push(chatReplyMessage(name, message, text), { handoffSettled: true });
+        this.push(
+          relayPush(
+            this.opts.link.relayInstructions().chatReply,
+            [`Chat: ${name}`, `Your message: ${message}`],
+            text,
+          ),
+          { handoffSettled: true },
+        );
       },
       (err: Error) => {
         this.opts.logger.error(
@@ -341,8 +348,11 @@ export class VoiceAgentCall {
           'voice: the chat a message was sent to failed to answer',
         );
         this.push(
-          `The chat "${name}" did not answer the message you sent it ("${message}"): it failed ` +
-            `(${err.message}). Tell the user.`,
+          relayPush(
+            this.opts.link.relayInstructions().failure,
+            [`Chat: ${name}`, `Your message: ${message}`],
+            `It failed: ${err.message}`,
+          ),
           { handoffSettled: true },
         );
       },

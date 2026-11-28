@@ -23,6 +23,10 @@ import {
   DEFAULT_MANAGER_PROMPT,
   DEFAULT_VOICE_DEVICE_PROMPT,
   DEFAULT_VOICE_INSTRUCTIONS,
+  DEFAULT_VOICE_RELAY_CHAT_REPLY,
+  DEFAULT_VOICE_RELAY_FAILURE,
+  DEFAULT_VOICE_RELAY_HANDOFF_ANSWER,
+  DEFAULT_VOICE_RELAY_UNPROMPTED,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
@@ -90,6 +94,10 @@ export type Layer =
   | 'job-autonomy'
   | 'voice-device'
   | 'voice-instructions'
+  | 'voice-relay-handoff-answer'
+  | 'voice-relay-chat-reply'
+  | 'voice-relay-unprompted'
+  | 'voice-relay-failure'
   | 'question-expired'
   | 'meeting-now'
   | 'meeting-notes'
@@ -106,6 +114,10 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'job-autonomy': 'How jobs work on their own',
   'voice-device': 'Speaking aloud',
   'voice-instructions': 'Voice instructions',
+  'voice-relay-handoff-answer': 'Hand-off answer',
+  'voice-relay-chat-reply': 'Reply from another chat',
+  'voice-relay-unprompted': 'Unprompted message',
+  'voice-relay-failure': 'Failure',
   'question-expired': 'When a question times out',
   'meeting-now': 'Now',
   'meeting-notes': 'Notes',
@@ -124,6 +136,10 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'job-autonomy': 'Autonomy prompt',
   'voice-device': 'Speaking aloud prompt',
   'voice-instructions': 'Voice instructions',
+  'voice-relay-handoff-answer': 'Hand-off answer',
+  'voice-relay-chat-reply': 'Reply from another chat',
+  'voice-relay-unprompted': 'Unprompted message',
+  'voice-relay-failure': 'Failure',
   'question-expired': 'Question timeout prompt',
   'meeting-now': 'Meeting Now prompt',
   'meeting-notes': 'Meeting notes prompt',
@@ -140,6 +156,19 @@ export const TEXT_PROMPTS = {
   'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
   'voice-device': { key: 'voiceDevicePrompt', fallback: DEFAULT_VOICE_DEVICE_PROMPT },
   'voice-instructions': { key: 'voiceInstructions', fallback: DEFAULT_VOICE_INSTRUCTIONS },
+  'voice-relay-handoff-answer': {
+    key: 'voiceRelayHandoffAnswer',
+    fallback: DEFAULT_VOICE_RELAY_HANDOFF_ANSWER,
+  },
+  'voice-relay-chat-reply': {
+    key: 'voiceRelayChatReply',
+    fallback: DEFAULT_VOICE_RELAY_CHAT_REPLY,
+  },
+  'voice-relay-unprompted': {
+    key: 'voiceRelayUnprompted',
+    fallback: DEFAULT_VOICE_RELAY_UNPROMPTED,
+  },
+  'voice-relay-failure': { key: 'voiceRelayFailure', fallback: DEFAULT_VOICE_RELAY_FAILURE },
   'question-expired': {
     key: 'questionExpiredPrompt',
     fallback: DEFAULT_QUESTION_EXPIRED_PROMPT,

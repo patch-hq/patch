@@ -213,6 +213,7 @@ export * from './manager-finished.js';
 export * from './thread-rows.js';
 export * from './manager-voice-prompt.js';
 export * from './voice-instructions.js';
+export * from './voice-relay.js';
 export * from './link-summary-prompt.js';
 export * from './voice-profiles.js';
 export * from './question-expired-prompt.js';

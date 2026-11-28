@@ -159,6 +159,10 @@ describe('Voice agent', () => {
       'Speed',
       'Reply eagerness',
       'Voice instructions',
+      'Hand-off answer',
+      'Reply from another chat',
+      'Unprompted message',
+      'Failure',
     ]);
     expect(screen.getByTestId('voice-agent-stability-value')).toHaveTextContent('0.7');
     expect(screen.getByTestId('voice-agent-speed-value')).toHaveTextContent('0.95×');

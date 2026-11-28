@@ -48,7 +48,7 @@ describe('voice instructions', () => {
     const tools = voiceAgentTools({ handoff: 'auto', lookBack: true, switchChat: true });
     const pass = tools.find((t) => t.name === PASS_TO_AGENT_TOOL_NAME)!;
     expect(pass.description).toMatch(/answers "received" at once/);
-    expect(pass.description).toMatch(/Answer from the chat's agent/);
+    expect(pass.description).toMatch(/relay it as that message instructs/);
     expect(tools.map((t) => t.name)).toEqual([
       PASS_TO_AGENT_TOOL_NAME,
       'check_status',
@@ -258,7 +258,7 @@ describe('VoiceAgentCall', () => {
     expect(spoken).toEqual([]);
     reply('All 212 tests pass.');
     await vi.waitFor(() => expect(spoken).toHaveLength(1));
-    expect(spoken[0]).toContain('The chat "Laptop build" has answered');
+    expect(spoken[0]).toContain('Chat: Laptop build');
     expect(spoken[0]).toContain('run tests');
     expect(spoken[0]).toContain('All 212 tests pass.');
     expect(call.openHandoffs()).toBe(0);
@@ -289,7 +289,7 @@ describe('VoiceAgentCall', () => {
     call.attach(engine);
     await call.runTool(SEND_TO_CHAT_TOOL_NAME, { chat: 'laptop', message: 'x' });
     await vi.waitFor(() => expect(spoken).toHaveLength(1));
-    expect(spoken[0]).toContain('did not answer');
+    expect(spoken[0]).toContain('It failed:');
     expect(spoken[0]).toContain('rate limited');
   });
 

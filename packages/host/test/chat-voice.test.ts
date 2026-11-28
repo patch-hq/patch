@@ -1,8 +1,14 @@
+import {
+  DEFAULT_SHARED_SETTINGS,
+  DEFAULT_VOICE_RELAY_HANDOFF_ANSWER,
+  DEFAULT_VOICE_RELAY_UNPROMPTED,
+  relayFrom,
+} from '@patch/wire';
 // spec/07 § Keeping voice and text as one conversation / § Call cost — the
 // glue between open voice sessions and their chats, against a real chat
 // host (mock SDK backend, real history log).
 
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,6 +101,7 @@ function setup() {
       new Promise<string>((resolve, reject) => replies.set(chatId, { resolve, reject })),
   );
   const glue = createChatVoice({
+    relayInstructions: () => relay,
     daemon,
     sessionsOnChat: (chatId) => open.filter((s) => s.getCurrentChatId() === chatId),
     sessionById: (sessionId) => byId.get(sessionId),
@@ -167,7 +174,13 @@ const messages = (events: WireEvent[]) =>
     (e): e is Extract<WireEvent, { type: 'chat.message' }> => e.type === 'chat.message',
   );
 
+let relay = relayFrom(DEFAULT_SHARED_SETTINGS);
+
 describe('chat voice glue', () => {
+  beforeEach(() => {
+    relay = relayFrom(DEFAULT_SHARED_SETTINGS);
+  });
+
   it('a fast voice exchange lands in the chat tagged with its surface, the reply streamed', async () => {
     const { daemon, events, folder, glue } = setup();
     const chatId = await daemon.spawnChat({ folder });
@@ -208,6 +221,26 @@ describe('chat voice glue', () => {
     expect(messages(events)).toEqual([]);
   });
 
+  it('editing a relay setting changes the next push; each kind uses its own', async () => {
+    const { daemon, folder, glue, open } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const { session, pushed } = fakeSession(chatId);
+    open.push(session);
+    relay = { ...relay, unprompted: 'UNPROMPTED-ONE' };
+    await daemon.sendInput({ chatId, message: 'typed one', localId: randomUUID() });
+    expect(pushed[0]!.text.startsWith('UNPROMPTED-ONE')).toBe(true);
+    relay = { ...relay, unprompted: 'UNPROMPTED-TWO' };
+    await daemon.sendInput({ chatId, message: 'typed two', localId: randomUUID() });
+    expect(pushed[1]!.text.startsWith('UNPROMPTED-TWO')).toBe(true);
+    expect(glue).toBeDefined();
+  });
+
+  it('the defaults say nothing about where the content came from', () => {
+    for (const text of Object.values(relayFrom(DEFAULT_SHARED_SETTINGS))) {
+      expect(text).not.toMatch(/\b(agent|chat|answered|says|said|message from|says that)\b/i);
+    }
+  });
+
   it('a write to a chat that does not exist is logged, never thrown into the provider socket', () => {
     const { glue } = setup();
     expect(() => glue.makeTimeline(init('nope')).userSaid('nope', 'hi')).not.toThrow();
@@ -224,7 +257,7 @@ describe('chat voice glue', () => {
 
     expect(pushed).toHaveLength(1);
     expect(pushed[0]!.text).toContain('agent says hi');
-    expect(pushed[0]!.text).toMatch(/not an answer to anything you passed on/);
+    expect(pushed[0]!.text).toContain(DEFAULT_VOICE_RELAY_UNPROMPTED);
     expect(pushed[0]!.settled).toBe(false);
     expect(pushed.some((p) => p.text.includes('working on it'))).toBe(false);
     expect(pushed.some((p) => p.text.includes('typed with progress'))).toBe(false);
@@ -244,7 +277,7 @@ describe('chat voice glue', () => {
     releaseTurns();
     await vi.waitFor(() => expect(pushed).toHaveLength(1));
     expect(pushed[0]).toEqual({
-      text: 'Answer from the chat\'s agent to "Add milk": agent says hi',
+      text: `${DEFAULT_VOICE_RELAY_HANDOFF_ANSWER}\n\nRequest: Add milk\n\nagent says hi`,
       settled: true,
     });
     // The row records it: waiting, working, then answered with the agent's message.
@@ -311,7 +344,7 @@ describe('chat voice glue', () => {
     const failing = vi.spyOn(daemon, 'sendInput').mockRejectedValueOnce(new Error('folder gone'));
     glue.link.passToAgent({ sessionId: 'sess-1', chatId, request: 'Tidy up', source });
     await vi.waitFor(() => expect(pushed).toHaveLength(1));
-    expect(pushed[0]!.text).toContain('failed (folder gone)');
+    expect(pushed[0]!.text).toContain('It failed: folder gone');
     expect(pushed[0]!.settled).toBe(true);
     expect(handoffs(events).map((h) => [h.state, h.error])).toEqual([
       ['waiting', undefined],
@@ -331,7 +364,7 @@ describe('chat voice glue', () => {
     session.setFocus(chatB);
     releaseTurns();
     await vi.waitFor(() => expect(pushed).toHaveLength(1));
-    expect(pushed[0]!.text).toMatch(/to "Add milk" \(from the chat "/);
+    expect(pushed[0]!.text).toMatch(/Request: Add milk\n\nChat: /);
   });
 
   it('find chats and chat status: an ordinary call reads a chat on another host, archived chats labelled', async () => {

@@ -23,6 +23,7 @@
 // The provider modules turn these into their own tool shapes and answer them
 // through a {@link VoiceAgentLink}, which the host implements (chatVoice.ts).
 
+import type { VoiceRelayInstructions } from '@patch/wire';
 import type { VoiceHandoff } from '@patch/wire/audio';
 import type { VoiceTurnSource } from './session.js';
 
@@ -38,16 +39,13 @@ export const SEND_TO_CHAT_TOOL_NAME = 'send_to_chat';
 /** What pass_to_agent answers, at once. */
 export const HANDOFF_RECEIVED = 'received';
 
-/** How a pushed answer starts, so the voice can tell it from anything else. */
-export const ANSWER_LABEL = "Answer from the chat's agent";
-
 export const PASS_TO_AGENT_DESCRIPTION =
   "Pass a request to the chat's agent, which has the user's files, data and tools and can do " +
   'real work. Use it for anything you cannot answer from the chat and your own knowledge, and ' +
   'for every action. It answers "received" at once: say in a few words of your own that you ' +
   'have passed it on, then carry on talking and answer anything else the user says. The agent ' +
-  `takes it when it is free. Its answer arrives later as a message starting "${ANSWER_LABEL}": ` +
-  'then tell the user the gist in a sentence or two, not the whole text. Until that message ' +
+  `takes it when it is free. Its answer arrives later as a message: ` +
+  'relay it as that message instructs. Until that message ' +
   'arrives the request is not done, so never say it is, and never pass the same request on twice.';
 
 export const CHECK_STATUS_DESCRIPTION =
@@ -94,13 +92,13 @@ export const END_CALL_DESCRIPTION =
   'on. Never hang up because the user is quiet: silence is not the end of a call, and the user ' +
   'may be busy or listening. Say a short goodbye first; the call ends once it has been heard.';
 
-/** A chat's reply as it is pushed into a call that sent it a message. */
-export function chatReplyMessage(name: string, message: string, reply: string): string {
-  return (
-    `The chat "${name}" has answered the message you sent it ("${message}"). Its reply, to tell ` +
-    `the user now, in your own words (if it is only a receipt that the request was passed on or ` +
-    `sent elsewhere, with no answer, say nothing): ${reply}`
-  );
+/**
+ * What a push into a call says: the user's instruction for how to relay this
+ * kind of content, the few facts the voice needs to place it, then the content
+ * as it is. Nothing else is hard-coded (spec/07 § Pushes).
+ */
+export function relayPush(instruction: string, facts: string[], content: string): string {
+  return [instruction.trim(), ...facts, content].join('\n\n');
 }
 
 /** One tool as every provider declares it: string parameters, described. */
@@ -232,6 +230,8 @@ export interface VoiceAgentLink {
    * cannot be read: a voice that knows nothing of its chat is a failure.
    */
   startContext(chatId: string): StartContext;
+  /** The user's four relay instructions, read afresh for each push. */
+  relayInstructions(): VoiceRelayInstructions;
   /**
    * Pass a request to the chat's agent. Returns at once, once the request is
    * written into the chat and queued; throws when it could not be.

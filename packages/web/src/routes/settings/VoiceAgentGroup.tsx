@@ -31,7 +31,13 @@ import { patchShared } from './sharedWrite.js';
 import { sendToHost } from './hostWrite.js';
 import { Group, Pills, Row } from './ui.js';
 import { PromptRow } from './PromptRow.js';
-import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import {
+  DEFAULT_VOICE_INSTRUCTIONS,
+  DEFAULT_VOICE_RELAY_CHAT_REPLY,
+  DEFAULT_VOICE_RELAY_FAILURE,
+  DEFAULT_VOICE_RELAY_HANDOFF_ANSWER,
+  DEFAULT_VOICE_RELAY_UNPROMPTED,
+} from '@patch/wire';
 
 const PROVIDERS = VoiceAgentProvider.options;
 
@@ -453,6 +459,7 @@ export function VoiceAgentGroup(): JSX.Element {
         </>
       )}
       <VoiceInstructionsRow />
+      <VoiceRelayRows />
     </Group>
   );
 }
@@ -472,5 +479,57 @@ function VoiceInstructionsRow(): JSX.Element {
         patchShared('voice instructions', { voiceInstructions: DEFAULT_VOICE_INSTRUCTIONS })
       }
     />
+  );
+}
+
+const RELAY_ROWS = [
+  {
+    id: 'voice-relay-handoff-answer',
+    title: 'Hand-off answer',
+    sub: 'How the voice relays the answer to something it passed on.',
+    key: 'voiceRelayHandoffAnswer',
+    def: DEFAULT_VOICE_RELAY_HANDOFF_ANSWER,
+  },
+  {
+    id: 'voice-relay-chat-reply',
+    title: 'Reply from another chat',
+    sub: "How the voice relays another chat's reply to a message it sent.",
+    key: 'voiceRelayChatReply',
+    def: DEFAULT_VOICE_RELAY_CHAT_REPLY,
+  },
+  {
+    id: 'voice-relay-unprompted',
+    title: 'Unprompted message',
+    sub: "How the voice relays a message the chat's agent sends on its own.",
+    key: 'voiceRelayUnprompted',
+    def: DEFAULT_VOICE_RELAY_UNPROMPTED,
+  },
+  {
+    id: 'voice-relay-failure',
+    title: 'Failure',
+    sub: 'How the voice relays a request or message that failed.',
+    key: 'voiceRelayFailure',
+    def: DEFAULT_VOICE_RELAY_FAILURE,
+  },
+] as const;
+
+/** How the voice relays each kind of push (spec/07 § Pushes): the user's own instruction per kind. */
+function VoiceRelayRows(): JSX.Element {
+  const preferences = usePreferencesStore((s) => s.preferences);
+  return (
+    <>
+      {RELAY_ROWS.map((r) => (
+        <PromptRow
+          key={r.id}
+          id={r.id}
+          title={r.title}
+          sub={r.sub}
+          defaultText={r.def}
+          current={preferences[r.key]}
+          onSave={(text) => patchShared(r.title, { [r.key]: text })}
+          onDefault={() => patchShared(r.title, { [r.key]: r.def })}
+        />
+      ))}
+    </>
   );
 }

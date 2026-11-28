@@ -14,7 +14,12 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
-import type { ChatActivity, ChatVoiceHandoffEvent, WireEvent } from '@patch/wire';
+import type {
+  ChatActivity,
+  ChatVoiceHandoffEvent,
+  VoiceRelayInstructions,
+  WireEvent,
+} from '@patch/wire';
 import { parseYesNo, type SessionInit, type VoiceTurnSource } from './session.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import {
@@ -27,7 +32,7 @@ import {
 import type { VoiceLedger } from './voiceLedger.js';
 import {
   ageWords,
-  ANSWER_LABEL,
+  relayPush,
   START_RECENT_MESSAGES,
   startContextText,
   type StartContext,
@@ -157,6 +162,8 @@ const cap = (text: string, max: number): string => {
 };
 
 export function createChatVoice(deps: {
+  /** The user's relay instructions (Settings → Voice calls), read for each push. */
+  relayInstructions: () => VoiceRelayInstructions;
   daemon: ChatVoiceHost;
   /** The open sessions on a chat; empty before the audio server is up. */
   sessionsOnChat: (chatId: string) => VoiceSessionLike[];
@@ -245,9 +252,9 @@ export function createChatVoice(deps: {
       return chatId;
     }
   };
-  /** " (from the chat "X")" when the call has moved away from the chat a push is about. */
-  const fromChat = (session: VoiceSessionLike, chatId: string): string =>
-    session.getCurrentChatId() === chatId ? '' : ` (from the chat "${chatLabel(chatId)}")`;
+  /** Which chat a push is about, when the call has moved away from it. */
+  const chatFact = (session: VoiceSessionLike, chatId: string): string[] =>
+    session.getCurrentChatId() === chatId ? [] : [`Chat: ${chatLabel(chatId)}`];
 
   const settleHandoff = (
     h: Handoff,
@@ -256,7 +263,7 @@ export function createChatVoice(deps: {
     const r = h.record;
     if (r.state === 'answered' || r.state === 'failed') return;
     const session = deps.sessionById?.(h.sessionId);
-    const where = session ? fromChat(session, r.chatId) : '';
+    const where = session ? chatFact(session, r.chatId) : [];
     const answer = 'answer' in outcome ? cap(outcome.answer, PUSH_MAX_CHARS) : '';
     publish(
       h,
@@ -271,10 +278,15 @@ export function createChatVoice(deps: {
       );
       return;
     }
+    const relay = deps.relayInstructions();
     const push =
       'answer' in outcome
-        ? `${ANSWER_LABEL} to "${r.request}"${where}: ${answer}`
-        : `The request "${r.request}"${where} was not answered: it failed (${outcome.error}). Tell the user.`;
+        ? relayPush(relay.handoffAnswer, [`Request: ${r.request}`, ...where], answer)
+        : relayPush(
+            relay.failure,
+            [`Request: ${r.request}`, ...where],
+            `It failed: ${outcome.error}`,
+          );
     logger.info(
       { sessionId: h.sessionId, chatId: r.chatId, state: h.record.state },
       'voice: hand-off settled, pushing it into the call',
@@ -314,7 +326,7 @@ export function createChatVoice(deps: {
     if (failed !== null || reply === undefined || chatId === MANAGER_CHAT_ID) return;
     for (const session of deps.sessionsOnChat(chatId)) {
       session.pushMessage(
-        `Message from the chat's agent, ending its turn (not an answer to anything you passed on): ${cap(reply, PUSH_MAX_CHARS)}`,
+        relayPush(deps.relayInstructions().unprompted, [], cap(reply, PUSH_MAX_CHARS)),
       );
     }
   };
@@ -398,6 +410,7 @@ export function createChatVoice(deps: {
 
   const link: VoiceAgentLink = {
     startContext,
+    relayInstructions: deps.relayInstructions,
 
     answerPermission(chatId, words) {
       const requestId = deps.daemon.getPendingPermissionForChat(chatId);
