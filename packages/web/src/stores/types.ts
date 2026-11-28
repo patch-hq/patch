@@ -129,7 +129,7 @@ export interface ChatRow {
   statusKind: StatusKind | null;
   /**
    * Whether `statusKind` is a real declared status (`patch_ask_human` /
-   * `patch_report`) rather than a generated one-shot's guess. Only a declared
+   * `patch_surface`) rather than a generated one-shot's guess. Only a declared
    * `question` outranks the read/unread check in `deriveBadge` — a generated
    * guess is a frequent false positive (any reply containing a `?`) and must
    * not freeze the row indigo forever. `null`/`false` for a generated status

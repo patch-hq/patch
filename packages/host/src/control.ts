@@ -980,7 +980,7 @@ const AskHumanBody = z
   })
   .strict();
 
-const ReportBody = z
+const SurfaceBody = z
   .object({
     summary: z.string().min(1).max(200),
     callerChatId: z.string().min(1),
@@ -4316,27 +4316,26 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return { ok: true };
   });
 
-  // patch_report. The third way into the sidebar, and the ONLY one an agent
+  // patch_surface. The third way into the sidebar, and the ONLY one an agent
   // elects for itself: a permission is a request the platform is holding and a
-  // question is the chat being stuck, but a report is a judgement — "of the
+  // question is the chat being stuck, but a surface is a judgement — "of the
   // twenty things that ran overnight, this is one of the ones worth your
-  // morning". Nothing is blocked and nothing is asked; the chat simply stops
-  // being hidden and carries a line saying why.
+  // morning". Nothing is blocked and nothing is asked; the chat stops being
+  // hidden, carries a line saying why, and tells the user with a push.
   //
-  // It makes no sound. That is the point of having it: a hidden job's only
-  // routes out used to be a block or a notification, so anything worth seeing
-  // later had to either interrupt or stay invisible.
-  app.post('/internal/report', async (req, reply) => {
+  // It used to be silent, which meant an agent bringing a chat back had to
+  // remember a second call (patch_notify) or the user never found out.
+  app.post('/internal/surface', async (req, reply) => {
     const start = Date.now();
     if (require503(reply)) return;
-    const parsed = ReportBody.safeParse(req.body);
+    const parsed = SurfaceBody.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
     const { summary, callerChatId } = parsed.data;
     if (!limiter.check(`report:${callerChatId}`)) {
       toolLog({
-        tool: 'patch_report',
+        tool: 'patch_surface',
         callerChatId,
         durationMs: Date.now() - start,
         ok: false,
@@ -4350,9 +4349,20 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         message: `chat not found: ${callerChatId}`,
       } satisfies ErrorEnvelope);
     }
+    const state = opts.daemon!.chatState.get(callerChatId);
     await opts.daemon!.declareStatus(callerChatId, 'report', summary);
-    app.log.info({ chatId: callerChatId, summary }, 'patch_report: worth the user seeing');
-    toolLog({ tool: 'patch_report', callerChatId, durationMs: Date.now() - start, ok: true });
+    if (opts.emitWire) {
+      const event: WireEvent = {
+        type: 'notify',
+        chatId: callerChatId,
+        channel: 'push',
+        message: `${state?.name ?? 'A chat'}: ${summary}`,
+        priority: 'normal',
+      };
+      opts.emitWire(event);
+    }
+    app.log.info({ chatId: callerChatId, summary }, 'patch_surface: worth the user seeing');
+    toolLog({ tool: 'patch_surface', callerChatId, durationMs: Date.now() - start, ok: true });
     return { ok: true };
   });
 

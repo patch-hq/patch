@@ -2596,7 +2596,7 @@ describe('Sidebar', () => {
       summary: string,
       folder = '~/proj',
       // Every existing caller means a real declared status (`patch_ask_human`/
-      // `patch_report`) — only the dedicated false-positive test below passes
+      // `patch_surface`) — only the dedicated false-positive test below passes
       // `false` to model a generated one-shot's guess.
       declared = true,
     ): void {

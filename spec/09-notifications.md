@@ -92,19 +92,19 @@ It pushes at the alert rung and **declares the chat's status as `question`** (`0
 
 Declaring is what makes the ask survive the notification. `task` becomes the line on the chat's row and is persisted, so a missed push does not lose the request and a restart does not either. It stays until the user puts a turn into the chat. Write `task` as an instruction the user could follow without opening the chat; `why` carries the consequence of not doing it. Having called it, the agent decides for itself whether to wait or carry on with whatever is still possible — the platform does not park the turn on its behalf.
 
-## `patch_report` — worth seeing, nothing blocked
+## `patch_surface` — bring the chat back, with a push
 
 The third and only agent-elected way into the sidebar (`04-chats-and-folders.md` § Chat model):
 
 ```typescript
-patch_report({
+patch_surface({
   summary: string, // ≤200 chars
 });
 ```
 
-A permission is a request the platform is holding and a question is the chat being stuck; a report is a judgement. Of twenty jobs that ran overnight, this is one of the one or two worth a person's morning. It takes the chat out of Archived and puts `summary` on its row, and it **makes no sound** — that is the point of having it. Before it existed, every route out of hiding was welded to an interruption, so a job with something worth seeing later had to either push or stay invisible.
+A permission is a request the platform is holding and a question is the chat being stuck; surfacing is a judgement. Of twenty jobs that ran overnight, this is one of the one or two worth a person's morning. It takes the chat out of Archived and puts `summary` on its row, and it **sends a normal push** (`"<chat>: <summary>"`, routed like any message, held back while the user is active at a computer). Bringing a chat back and telling the user are one act, so the agent never needs a separate `patch_notify`. It was called `patch_report` and was silent; the name was unclear and the silence meant a hidden chat could come back with nobody told.
 
-Because the agent elects it, the bar belongs in each job's own prompt: a run that did what it always does and found nothing unusual says nothing and stays hidden. `summary` is the finding itself ("the backup has been failing silently since Tuesday"), not a description of the run ("backup check complete"). A report and a notification are independent — send both when something is both urgent now and worth seeing later.
+Because the agent elects it, the bar belongs in each job's own prompt: a run that did what it always does and found nothing unusual says nothing and stays hidden. `summary` is the finding itself ("the backup has been failing silently since Tuesday"), not a description of the run ("backup check complete"). Use `patch_notify` instead only to interrupt without surfacing the chat, or at a higher importance when it is urgent now.
 
 ## `patch_call` — the phone-call escalation tool
 
@@ -350,7 +350,7 @@ The message names the chat and what is being asked: the question text itself for
 
 ## Snoozed chats
 
-While a chat is snoozed (`snoozedUntil > now`, `04-chats-and-folders.md` § Snooze) it produces no notification of any kind on any channel: push/FCM, desktop, the in-app toast and the bell. That covers chat completion, waiting on a permission or `AskUserQuestion`, `patch_ask_human`, `patch_report`, `patch_notify` at every importance, `patch_call` and errors. The rule is applied once, where every notification is routed (the server's notification router, the bell's log and the call orchestrator), by looking the chat up at the moment the notification would be sent; a notification that is dropped is not queued and is not replayed when the snooze ends. What the user sees instead is the Back state (`04-chats-and-folders.md` § Snooze → Back). A permission prompt or question raised while snoozed waits, and does not end the snooze. Not changed: an agent's `patch_send_to` into a snoozed chat ends the snooze, a permission prompt that expires still expires, and finished chats (`06-threads-manager-speakers.md` § Finished chats) skips snoozed chats.
+While a chat is snoozed (`snoozedUntil > now`, `04-chats-and-folders.md` § Snooze) it produces no notification of any kind on any channel: push/FCM, desktop, the in-app toast and the bell. That covers chat completion, waiting on a permission or `AskUserQuestion`, `patch_ask_human`, `patch_surface`, `patch_notify` at every importance, `patch_call` and errors. The rule is applied once, where every notification is routed (the server's notification router, the bell's log and the call orchestrator), by looking the chat up at the moment the notification would be sent; a notification that is dropped is not queued and is not replayed when the snooze ends. What the user sees instead is the Back state (`04-chats-and-folders.md` § Snooze → Back). A permission prompt or question raised while snoozed waits, and does not end the snooze. Not changed: an agent's `patch_send_to` into a snoozed chat ends the snooze, a permission prompt that expires still expires, and finished chats (`06-threads-manager-speakers.md` § Finished chats) skips snoozed chats.
 
 ## Batch check-in
 

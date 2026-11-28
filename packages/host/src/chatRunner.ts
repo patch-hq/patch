@@ -838,7 +838,7 @@ export const COMPUTER_USE_TOOL = 'Computer use';
  */
 const SUBAGENT_DISALLOWED_PATCH_TOOLS = [
   'mcp__patch__patch_notify',
-  'mcp__patch__patch_report',
+  'mcp__patch__patch_surface',
   'mcp__patch__patch_call',
   'mcp__patch__patch_end_call',
   'mcp__patch__patch_speak',
@@ -13055,7 +13055,7 @@ export class Daemon {
       state.consecutiveHookBlocks = 0;
       // `declareStatus` (spec/04 § Current status) is the one place a
       // `report` is persisted, un-hides/un-archives the chat, and emits —
-      // the same "needs attention" claim the agent's own `patch_report`
+      // the same "needs attention" claim the agent's own `patch_surface`
       // makes, just made by the host on a hook's behalf this time.
       void this.declareStatus(event.chatId, 'report', summary).catch((err) => {
         this.opts.logger.warn(

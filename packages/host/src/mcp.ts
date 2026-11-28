@@ -1487,12 +1487,12 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     },
   );
 
-  // ---- patch_report -------------------------------------------------------
+  // ---- patch_surface -------------------------------------------------------
   server.registerTool(
-    'patch_report',
+    'patch_surface',
     {
       description:
-        "Say this chat is worth the user SEEING, when nothing is blocked and nothing is being asked. It takes the chat out of Archived and puts one line on its row in the sidebar. It makes NO sound — use patch_notify if it also needs to reach them now; the two are independent and a chat can do either, both, or neither. This is the only sidebar state an agent chooses for itself, so hold a high bar: the user may have twenty jobs finish overnight and wants the one or two that actually matter, not twenty rows saying a job ran. A job that did what it always does and found nothing unusual should say NOTHING and stay hidden. Write the summary as the finding itself ('the backup has been failing silently since Tuesday'), not as a description of the run ('backup check complete').",
+        "Bring this chat back into the user's view and tell them, when nothing is blocked and nothing is asked. It takes the chat out of Hidden/Archived, puts one line on its row in the sidebar, and sends a notification — you do NOT need patch_notify as well. Hold a high bar: the user may have twenty jobs finish overnight and wants the one or two that actually matter. A job that did what it always does and found nothing unusual should say NOTHING and stay hidden. Write the summary as the finding itself ('the backup has been failing silently since Tuesday'), not as a description of the run ('backup check complete').",
       inputSchema: {
         summary: z.string().min(1).max(200),
       },
@@ -1500,7 +1500,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     async ({ summary }) => {
       const res = await uds<unknown>({
         method: 'POST',
-        path: '/internal/report',
+        path: '/internal/surface',
         body: { summary, callerChatId },
       });
       return toolResult(res);
