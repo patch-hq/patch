@@ -104,6 +104,26 @@ test('a call whose heartbeat stops says Lost contact, resumes, and sends the log
     });
   });
   await page.goto('/app/dev-harness.html?chat=thread_manager&ws=fake&shell=1');
+  // A call is checked before it dials (spec/07 § Readiness): the host must hold
+  // the key of the voice agent the call uses (Gemini by default).
+  await page.evaluate(() => {
+    const store = (
+      window as unknown as {
+        __presenceStore: {
+          getState(): {
+            hosts: Record<string, { host: Record<string, unknown> | null }>;
+            setHostReport(r: Record<string, unknown>): void;
+          };
+        };
+      }
+    ).__presenceStore;
+    const host = store.getState().hosts['d1']!.host!;
+    store.getState().setHostReport({
+      ...host,
+      type: 'host.host',
+      voiceKeys: { gemini: true, openai: true, groq: false, deepgram: false, elevenlabs: true },
+    });
+  });
   await page.getByTestId('call-btn').click();
   const bar = page.getByTestId('voice-bar');
   await expect(bar).toHaveAttribute('data-state', 'listening');

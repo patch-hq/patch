@@ -182,7 +182,7 @@ test.describe('Settings — Voice calls', () => {
     await expect(page.getByTestId('voice-usage')).not.toContainText('$');
   });
 
-  test('a hosted provider whose key the host lacks says so, as an error', async ({ page }) => {
+  test('a hosted provider whose key the host lacks says so, with a Set up action', async ({ page }) => {
     await page.evaluate(() => {
       const store = (
         window as unknown as {
@@ -202,14 +202,8 @@ test.describe('Settings — Voice calls', () => {
       });
     });
     const line = page.getByTestId('voice-keys');
-    await expect(line).toHaveText(
-      'Not configured on dev-host: no Gemini key is set. Sessions there are refused.',
-    );
-    const color = await line.evaluate((el) => getComputedStyle(el).color);
-    const hint = await line.evaluate(
-      (el) => getComputedStyle(el.closest('.set-sub') as HTMLElement).color,
-    );
-    expect(color).not.toBe(hint);
+    // A calm invitation naming the host and what it lacks, with a Set up action.
+    await expect(line).toHaveText('Needs a Gemini key on dev-host. Set up');
     await page.getByTestId('voice-agent-provider-openai').click();
     await expect(page.getByTestId('voice-keys')).toHaveCount(0);
   });
