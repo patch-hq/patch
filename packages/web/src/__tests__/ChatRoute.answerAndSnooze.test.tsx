@@ -69,7 +69,7 @@ describe('Send answer and snooze', () => {
           },
         ],
       } as never,
-      { ...base, chatId: 'c2', name: 'two', activity: 'idle', lastUpdated: 1 },
+      { ...base, chatId: 'c2', name: 'two', activity: 'idle', lastUpdated: 1 } as never,
     ]);
     useChatStore.setState((s) => ({
       timelines: {
