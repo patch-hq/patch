@@ -11,8 +11,8 @@ import { test, expect, type Page, type WebSocketRoute } from '@playwright/test';
 // minute, as Chrome does to a tab hidden for a few minutes (headless Chrome
 // never hides a page itself). The test checks that, so throttled, the call
 // still answers every heartbeat, and that when the host goes silent the page
-// notices on its own (three seconds), resumes the call and comes back
-// live — which it can only do if nothing a call needs runs on the page's timers.
+// notices on its own, resumes the call and comes back live — which it can only
+// do if nothing a call needs runs on the page's timers.
 
 const CREDENTIAL = (() => {
   const b64 = (o: unknown): string =>
@@ -38,7 +38,7 @@ const BOOT = `
 interface FakeSession {
   sessionId: string;
   sent: Array<Record<string, unknown>>;
-  /** Stop sending heartbeats: the line has silently gone dead. */
+  /** The line drops: heartbeats stop and the socket closes (silence alone never drops a call). */
   silence(): void;
 }
 
@@ -50,7 +50,10 @@ async function playHost(page: Page): Promise<FakeSession[]> {
     const session: FakeSession = {
       sessionId: '',
       sent: [],
-      silence: () => clearInterval(timer),
+      silence: () => {
+        clearInterval(timer);
+        ws.close({ code: 1006, reason: 'line dropped' });
+      },
     };
     sessions.push(session);
     ws.onMessage((data) => {
