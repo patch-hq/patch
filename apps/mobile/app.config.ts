@@ -90,8 +90,9 @@ const config: ExpoConfig = {
   //
   // Bumped to 0.2.4: a voice agent call's audio session (socket, microphone,
   // heartbeat echo, playback) and the call's clock moved into the native voice
-  // service, so the call keeps going with the phone locked. This JS needs those
-  // native methods, so it must not reach a 0.2.3 APK.
+  // service, so the call keeps going with the phone locked; and the call's sounds
+  // play natively (PatchCallSounds). This JS needs those native methods, so it
+  // must not reach a 0.2.3 APK.
   runtimeVersion: '0.2.4',
   updates: {
     // Never contacted. The app points the updater at ITS server once paired

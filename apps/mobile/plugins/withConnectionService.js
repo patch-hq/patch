@@ -207,7 +207,13 @@ const SMART_TURN_TEST_KT = fs.readFileSync(
 // A voice agent call's own transport, run on native threads in the service
 // (spec/07 § A call keeps going in the background), and the microphone and
 // playback it shares with the JS-facing modules; CallFrames has a JVM check.
-const CALL_KT = ['CallTransport.kt', 'CallFrames.kt', 'MicCapture.kt', 'PcmPlayer.kt'].map(
+const CALL_KT = [
+  'CallTransport.kt',
+  'CallFrames.kt',
+  'MicCapture.kt',
+  'PcmPlayer.kt',
+  'PatchCallSoundsModule.kt',
+].map(
   (file) => [file, fs.readFileSync(path.join(__dirname, 'native', file), 'utf8')],
 );
 const CALL_FRAMES_TEST_KT = fs.readFileSync(

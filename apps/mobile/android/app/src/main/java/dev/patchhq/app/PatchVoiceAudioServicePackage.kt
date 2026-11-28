@@ -10,7 +10,8 @@ import com.facebook.react.uimanager.ViewManager
  * {@link PatchVoiceAudioServiceModule} (foreground service),
  * {@link PatchVoiceMicModule} (AudioRecord PCM16 mic tap — the up leg) and
  * {@link PatchVoiceTtsModule} (AudioTrack PCM16 playback — the down leg) for
- * the sustained voice call (see spec/07 § End-to-end voice transport).
+ * the sustained voice call (see spec/07 § End-to-end voice transport), and
+ * {@link PatchCallSoundsModule} (the call's own sounds, spec/07 § Call sounds).
  */
 class PatchVoiceAudioServicePackage : ReactPackage {
   override fun createNativeModules(
@@ -22,6 +23,7 @@ class PatchVoiceAudioServicePackage : ReactPackage {
       PatchVoiceTtsModule(reactContext),
       PatchSpeechModule(reactContext),
       PatchDirectCallModule(reactContext),
+      PatchCallSoundsModule(reactContext),
     )
 
   override fun createViewManagers(

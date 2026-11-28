@@ -30,19 +30,18 @@ import {
 } from './direct/directCall.js';
 
 // The looping call sounds follow the call's state (spec/07 § Call sounds):
-// connecting until the first session is open, reconnecting while a dropped
+// connecting until the call is ready, reconnecting while a dropped
 // line redials, and the agent ringing while an incoming call waits.
 useVoiceStore.subscribe((s) => {
   const call = s.call;
   // A paused call holds no session and is not being placed: it makes no sound,
   // and an agent's call rings over it (spec/07 § Pause).
   const live = call !== null && call.paused === null;
-  // Connecting lasts until the line is up: a voice agent call's session, or a
-  // direct call's microphone (it has no session to the host at all).
-  syncCallSoundLoop(
-    'connecting',
-    live && !call.reconnecting && s.session === null && call.phase === 'connecting',
-  );
+  // Connecting lasts until the call is ready: a voice agent call's first state
+  // past `connecting` from the host, which holds it there until the provider has
+  // set up (ElevenLabs takes seconds after the socket opens), or a direct call's
+  // microphone opening (it has no session to the host at all).
+  syncCallSoundLoop('connecting', live && !call.reconnecting && call.phase === 'connecting');
   syncCallSoundLoop('reconnecting', live && call.reconnecting);
   syncCallSoundLoop('agent-calling', s.incomingCall !== null && !live);
   syncCallSoundLoop('agent-working', live && (call.direct?.status.workingSince ?? null) !== null);
