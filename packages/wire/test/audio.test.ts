@@ -6,7 +6,6 @@ import {
   decodeAudio,
   encodeAudio,
   validateDeviceIdCoupling,
-  DEFAULT_VOICE_AGENT,
   DEFAULT_VOICE_CONFIG,
   DictationSetting,
   dictationEngineFor,
