@@ -887,7 +887,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'patch.list_chats.response': {
     type: 'patch.list_chats.response',
-    chats: [{ chatId: 'c1', hostId: 'host-a' }],
+    chats: [{ chatId: 'c1', hostId: 'host-a', hidden: false, snoozed: false }],
     sourceChatId: 'c1',
     chatCount: 3,
   },
@@ -908,6 +908,8 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
         name: 'Deploys',
         folder: '/w',
         status: 'active',
+        hidden: false,
+        snoozed: false,
         lastUpdated: 1,
         matchedIn: ['name'],
         excerpts: [{ seq: 3, role: 'user', text: 'deploy it' }],
