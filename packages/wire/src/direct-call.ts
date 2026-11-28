@@ -305,7 +305,7 @@ export interface ResolvedDirectCall {
 export const NO_SPEECH_ENGINE = 'No speech engine';
 /** A device whose setup is not saved, or not finished: nothing is chosen for it. */
 export const NOT_SET_UP =
-  'This device is not set up for direct calls. Set it up in Settings → Voice calls → Direct calls.';
+  'This device has no speech engine of its own, so direct calls need a cloud one picked for it.';
 
 export type DirectCallResolution =
   | { ok: true; call: ResolvedDirectCall }
@@ -325,21 +325,81 @@ export function directCallSummary(call: {
 }
 
 /**
+ * The setup a device runs on with nothing chosen: its own on-device engines,
+ * free and needing no key, each with its first model and voice. Each step
+ * stands alone, so a device with on-device speech to text but only cloud text
+ * to speech gets the first and has the second left for the user to pick.
+ */
+export function defaultDirectCallSetup(report: SpeechEngineReport): {
+  stt: DirectCallSetup['stt'] | undefined;
+  tts: DirectCallSetup['tts'];
+} {
+  const stt = report.stt.find((e) => e.where === 'device');
+  const tts = report.tts.find((e) => e.where === 'device');
+  return {
+    stt: stt
+      ? { engine: stt.engine, ...(stt.models[0] ? { model: stt.models[0] } : {}) }
+      : undefined,
+    tts: tts
+      ? {
+          engine: tts.engine,
+          ...(tts.models[0] ? { model: tts.models[0] } : {}),
+          ...(tts.voices[0] ? { voice: tts.voices[0] } : {}),
+        }
+      : undefined,
+  };
+}
+
+/**
+ * The saved setup with every step not yet chosen filled in: an engine not
+ * chosen is the device's own (`defaultDirectCallSetup`), a model or voice not
+ * chosen is its engine's first. What is saved is never replaced: a saved
+ * engine, model or voice the device no longer has is refused by
+ * `resolveDirectCall`, not swapped. Undefined while a step still has nothing
+ * to run on, which only happens where that step has no on-device engine.
+ */
+export function effectiveDirectCallSetup(
+  report: SpeechEngineReport,
+  setup: DirectCallSetup | undefined,
+): DirectCallSetup | undefined {
+  const dflt = defaultDirectCallSetup(report);
+  const sttEngine = setup?.stt.engine ?? dflt.stt?.engine;
+  const ttsEngine = setup?.tts?.engine ?? dflt.tts?.engine;
+  if (sttEngine === undefined || ttsEngine === undefined) return undefined;
+  const stt = report.stt.find((e) => e.engine === sttEngine);
+  const tts = report.tts.find((e) => e.engine === ttsEngine);
+  const sttModel = setup?.stt.model ?? stt?.models[0];
+  const ttsModel = setup?.tts?.model ?? tts?.models[0];
+  const voice = setup?.tts?.voice ?? tts?.voices[0];
+  return {
+    stt: { engine: sttEngine, ...(sttModel ? { model: sttModel } : {}) },
+    tts: {
+      engine: ttsEngine,
+      ...(ttsModel ? { model: ttsModel } : {}),
+      ...(voice ? { voice } : {}),
+      ...(setup?.tts?.sound ? { sound: setup.tts.sound } : {}),
+    },
+  };
+}
+
+/**
  * What a direct call from this device runs on. A device that reports no speech
- * to text or no text to speech engine has `No speech engine`. A device with no
- * setup chosen yet runs on the first engine it reports for each step, on-device
- * ones first, with that engine's first model and voice. A setup naming an engine
- * the device does not report is refused with what to change — never swapped.
+ * to text or no text to speech engine has `No speech engine`. Any step not
+ * chosen runs on the device's own engine and that engine's first model and
+ * voice (`effectiveDirectCallSetup`), so a phone or a computer with on-device
+ * speech needs no setup. A step with no on-device engine and nothing chosen is
+ * `NOT_SET_UP`. A saved choice the device does not report is refused with what
+ * to change — never swapped.
  */
 export function resolveDirectCall(
   report: SpeechEngineReport,
-  setup: DirectCallSetup | undefined,
+  saved: DirectCallSetup | undefined,
   tones: VoiceTones,
 ): DirectCallResolution {
   if (report.stt.length === 0 || report.tts.length === 0) {
     return { ok: false, reason: NO_SPEECH_ENGINE };
   }
-  // Nothing is chosen for the user: every step comes from the saved setup.
+  const setup = effectiveDirectCallSetup(report, saved);
   if (setup === undefined || setup.tts === undefined) return { ok: false, reason: NOT_SET_UP };
   const fix = 'Pick another in Settings → Voice calls → Direct calls.';
   const stt = report.stt.find((e) => e.engine === setup.stt.engine);
@@ -370,8 +430,11 @@ export function resolveDirectCall(
   }
   const { model: sttModel } = setup.stt;
   const { model: ttsModel, voice } = setup.tts;
-  if (sttModel === undefined || ttsModel === undefined) return { ok: false, reason: NOT_SET_UP };
-  if (voice === undefined && tts.voices.length > 0) return { ok: false, reason: NOT_SET_UP };
+  if (sttModel === undefined || ttsModel === undefined) {
+    const label =
+      sttModel === undefined ? STT_ENGINE_LABEL[stt.engine] : TTS_ENGINE_LABEL[tts.engine];
+    return { ok: false, reason: `${label} on this device has no model. ${fix}` };
+  }
   for (const [model, models, label] of [
     [sttModel, stt.models, STT_ENGINE_LABEL[stt.engine]],
     [ttsModel, tts.models, TTS_ENGINE_LABEL[tts.engine]],
@@ -526,8 +589,11 @@ export function directCallSteps(
   tones: VoiceTones,
 ): DirectCallSteps {
   const resolved = resolveDirectCall(report, setup, tones);
-  const sttEngine = setup?.stt.engine;
-  const ttsEngine = setup?.tts?.engine;
+  // Settings shows what a call would run on: the saved choices, and each step
+  // not chosen filled in as the call fills it.
+  const shown = effectiveDirectCallSetup(report, setup) ?? setup;
+  const sttEngine = shown?.stt.engine;
+  const ttsEngine = shown?.tts?.engine;
   const stt = report.stt.find((e) => e.engine === sttEngine);
   const tts = report.tts.find((e) => e.engine === ttsEngine);
   const option = <E extends string>(e: { engine: E; where: SpeechEngineWhere }, label: string) => ({
@@ -540,13 +606,13 @@ export function directCallSteps(
       options: preferDevice(report.stt).map((e) => option(e, STT_ENGINE_LABEL[e.engine])),
       engine: sttEngine,
     },
-    sttModel: { options: stt?.models ?? [], value: setup?.stt.model },
+    sttModel: { options: stt?.models ?? [], value: shown?.stt.model },
     tts: {
       options: preferDevice(report.tts).map((e) => option(e, TTS_ENGINE_LABEL[e.engine])),
       engine: ttsEngine,
     },
-    ttsModel: { options: tts?.models ?? [], value: setup?.tts?.model },
-    voice: { options: tts?.voices ?? [], value: setup?.tts?.voice },
+    ttsModel: { options: tts?.models ?? [], value: shown?.tts?.model },
+    voice: { options: tts?.voices ?? [], value: shown?.tts?.voice },
     sound: setup?.tts?.sound ?? {},
     summary: resolved.ok
       ? directCallSummary(resolved.call)

@@ -282,8 +282,8 @@ test.describe('Settings — Direct calls', () => {
         },
       },
     });
-    // The new engine's steps start over: the row reads Set up until they are chosen.
-    await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Set up');
+    // The new engine's model and voice start at its first, so it is ready at once.
+    await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → ElevenLabs');
     await page.getByTestId('direct-mac-1-tts-model').selectOption('eleven_flash_v2_5');
     await page.getByTestId('direct-mac-1-voice').selectOption('v-rachel');
     await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → ElevenLabs');

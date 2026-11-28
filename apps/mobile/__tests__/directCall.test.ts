@@ -4,7 +4,6 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
-import { NOT_SET_UP } from '@patch/wire/direct-call';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
@@ -173,14 +172,22 @@ describe('direct call refusals and pause', () => {
     expect(pushError).toHaveBeenCalledWith('Cannot call direct: No speech engine');
   });
 
-  it('a phone with engines but no saved setup is not set up: nothing is chosen for it', async () => {
+  it('a phone with nothing saved calls on Android’s own speech: no setup needed', async () => {
     useSettingsStore.setState({
       data: { preferences: { ...DEFAULT_SHARED_SETTINGS } },
     } as never);
     const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
-    await startDirectCall('c1', { mod: fakeModule().mod, mic: fakeMic().mic });
-    expect(useVoiceStore.getState().activeSession).toBeNull();
-    expect(pushError).toHaveBeenCalledWith(`Cannot call direct: ${NOT_SET_UP}`);
+    const openSetup = vi.fn();
+    await startDirectCall('c1', {
+      mod: fakeModule().mod,
+      mic: fakeMic().mic,
+      post: (async () => ({})) as never,
+      openSetup,
+    });
+    expect(pushError).not.toHaveBeenCalled();
+    expect(openSetup).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().activeSession).not.toBeNull();
+    expect(useVoiceStore.getState().callDirect?.setup).toBe('Android → Android');
   });
 
   it('pause releases the microphone and keeps the call; resume opens it again', async () => {

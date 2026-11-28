@@ -14,8 +14,8 @@ import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore, type HostPresence } from '../stores/presenceStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { NOT_SET_UP } from '@patch/wire/direct-call';
 import { VoiceBar } from '../components/VoiceBar.js';
 import { endVoiceCall } from '../lib/voiceController.js';
 import { startDirectCall, directCallActive, directCallLine } from '../lib/direct/directCall.js';
@@ -109,12 +109,15 @@ describe('direct call', () => {
     expect(pushError).toHaveBeenCalledWith('Cannot call direct: No speech engine');
   });
 
-  it('a browser with engines but no saved setup is not set up: nothing is chosen for it', async () => {
+  it('a browser with only cloud engines and nothing picked opens Settings → Voice calls rather than failing', async () => {
     usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
     const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
+    const openTab = vi.spyOn(useLayoutStore.getState(), 'openTab');
     await startDirectCall('c1');
     expect(useVoiceStore.getState().call).toBeNull();
-    expect(pushError).toHaveBeenCalledWith(`Cannot call direct: ${NOT_SET_UP}`);
+    expect(pushError).not.toHaveBeenCalled();
+    expect(useUiStore.getState().settingsPageRequest).toBe('voice');
+    expect(openTab).toHaveBeenCalledWith({ kind: 'page', page: 'settings' });
   });
 
   it('reads speech with the cloud engine, sends it as a voice turn, and reads the reply aloud', async () => {

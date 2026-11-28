@@ -134,15 +134,14 @@ describe('Direct calls (phone)', () => {
     expect(queryHost(r.root, byTestId('direct-phone-1-sound'))).toBeNull();
   });
 
-  it('an unset phone reads Set up and chooses nothing; each step is written as it is chosen', async () => {
+  it('a phone with nothing saved runs on Android’s own speech; a pick is written', async () => {
     seed({});
     const r = renderRN(<DirectCallsSection />);
-    expect(textOf(findHost(r.root, byTestId('direct-phone-1-summary')))).toBe('Set up');
+    expect(textOf(findHost(r.root, byTestId('direct-phone-1-summary')))).toBe('Android → Android');
     await open(r, 'phone-1');
     expect(
       findHost(r.root, byTestId('direct-phone-1-stt-android')).props.accessibilityState.selected,
-    ).toBe(false);
-    expect(queryHost(r.root, byTestId('direct-phone-1-tts-row'))).toBeNull();
+    ).toBe(true);
     await actAsync(async () => {
       findHost(r.root, byTestId('direct-phone-1-stt-groq')).props.onPress();
       await flush();
