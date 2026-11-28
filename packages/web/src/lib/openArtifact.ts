@@ -22,6 +22,22 @@ function groupWidth(chatId: string): number {
   return el ? el.getBoundingClientRect().width : 0;
 }
 
+/** The tab an artifact URL opens as (a Pad card names the Pad's own page). */
+export function artifactDescriptor(url: string, chatId: string): TabDescriptor {
+  const pad = /^\/pads\/([^/?#]+)$/.exec(url);
+  if (pad) return { kind: 'page', page: 'pad', padId: decodeURIComponent(pad[1] as string) };
+  const absolute = new URL(url, window.location.origin);
+  const match = ARTIFACT_PATH.exec(absolute.pathname);
+  if (!match) throw new Error(`Not an artifact URL: ${url}`);
+  return {
+    kind: 'page',
+    page: 'artifact',
+    chatId,
+    artifactId: decodeURIComponent(match[2] as string),
+    url: absolute.toString(),
+  };
+}
+
 export function openArtifact(url: string, chatId: string): void {
   // A Pad card is a `chat.artifact` whose url is the Pad's own route: it opens
   // beside its chat in a pane (spec/14 § Pads).

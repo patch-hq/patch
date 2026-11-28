@@ -23,7 +23,8 @@ import {
   type ArtifactRow,
   type ServerArtifact,
 } from '../lib/artifacts.js';
-import { openArtifact } from '../lib/openArtifact.js';
+import { artifactDescriptor, openArtifact } from '../lib/openArtifact.js';
+import { OpenableButton } from './OpenableLink.js';
 import { StatusPill, StatusRow } from './StatusRow.js';
 
 /**
@@ -95,18 +96,18 @@ export function ArtifactBar({ chatId }: { chatId: string }): JSX.Element | null 
   function link(a: ArtifactRow, index?: number): JSX.Element {
     const clipped = index !== undefined && index >= fit;
     return (
-      <button
+      <OpenableButton
         key={a.artifactId}
-        type="button"
+        opens={artifactDescriptor(a.url, chatId)}
         className="artifact-link"
         data-testid="artifact-bar-chip"
         title={a.path}
         tabIndex={clipped ? -1 : undefined}
         style={clipped ? { visibility: 'hidden' } : undefined}
-        onClick={() => openArtifact(a.url, chatId)}
+        onOpen={() => openArtifact(a.url, chatId)}
       >
         {a.title}
-      </button>
+      </OpenableButton>
     );
   }
 
