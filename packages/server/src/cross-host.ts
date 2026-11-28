@@ -310,10 +310,13 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
     if (event.type === 'patch.list_chats.request') {
       if (fromHostId === null) return;
       const chats = chatRegistry
-        .list({
-          ...(event.archived === 'only' ? { archivedOnly: true } : {}),
-          ...(event.archived === 'include' ? { includeArchived: true } : {}),
-        })
+        .list(
+          event.scope === 'archived'
+            ? { archivedOnly: true }
+            : event.scope === 'all'
+              ? { includeArchived: true, includeSnoozed: true, includeHidden: true }
+              : {},
+        )
         .map((c) => ({
           chatId: c.chatId,
           hostId: c.hostId,
@@ -321,6 +324,8 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
           preview: c.preview,
           folder: c.folder,
           status: c.status,
+          hidden: c.hidden,
+          snoozed: chatRegistry.isSnoozed(c),
           activity: c.activity,
           ...(c.chatStatus !== undefined ? { chatStatus: c.chatStatus } : {}),
           pinned: c.pinned,

@@ -210,7 +210,7 @@ export interface BuildOptions {
    */
   listAccountChats?: (
     sourceChatId: string,
-    archived?: 'only' | 'include',
+    scope?: 'archived' | 'all',
   ) => Promise<Array<{ chatId: string; hostId: string } & Record<string, unknown>>>;
   /**
    * `patch_search_chats`: search every chat on the account, answered by the
@@ -925,7 +925,7 @@ const AccountsStrategyBody = z
 
 const ListChatsQuery = z
   .object({
-    archived: z.enum(['only', 'include']).optional(),
+    scope: z.enum(['archived', 'all']).optional(),
     /** The calling chat, when there is one (the CLI in a terminal has none). */
     callerChatId: z.string().min(1).optional(),
   })
@@ -3448,10 +3448,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
     const caller = q.data.callerChatId;
     try {
-      const chats = await opts.listAccountChats(
-        caller ?? 'cli',
-        q.data.archived !== undefined ? q.data.archived : undefined,
-      );
+      const chats = await opts.listAccountChats(caller ?? 'cli', q.data.scope);
       toolLog({
         tool: 'patch_list_chats',
         ...(caller !== undefined ? { callerChatId: caller } : {}),

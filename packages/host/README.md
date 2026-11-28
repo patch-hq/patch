@@ -349,7 +349,7 @@ without contacting the host — used by the docker compose smoke check.
 | `patch_send_to`     | `POST /internal/send-to`                   | Deliver a user-turn message into another chat (idempotent). |
 | `patch_spawn`       | `POST /internal/spawn`                     | Create a new chat in `folder`. Returns `{ chatId }`.        |
 | `patch_history`     | `GET  /internal/history/:id?fromSeq&limit` | Paginated history. `limit` defaults 50, max 200.            |
-| `patch_list_chats`  | `GET /internal/chats?archived=only         | include`                                                    | Chat listing matching server REST `/api/chats` filter rules. |
+| `patch_list_chats`  | `GET /internal/chats?scope=archived        | all`                                                        | Chat listing matching server REST `/api/chats` filter rules. |
 | `patch_stop`        | `POST /internal/stop/:id`                  | Stop a chat (aborts the SDK query). Idempotent.             |
 | `patch_job_list`    | `GET  /internal/jobs`                      | List user jobs.                                             |
 | `patch_job_create`  | `POST /internal/jobs`                      | Create a job (cron/webhook/todoist + spawn/message).        |

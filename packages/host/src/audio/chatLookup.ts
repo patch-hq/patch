@@ -1,8 +1,8 @@
 // Finding and reading other chats from a voice call (spec/07 § The voice agent
 // and the chat's agent). One implementation for every call, on every provider:
 // the listing and the reads come from the Patch server, so a chat on another
-// host is found and read like one on this host, and archived chats are
-// included and labelled.
+// host is found and read like one on this host, and hidden, snoozed and
+// archived chats are included and labelled.
 
 import { stripVoiceTag } from '../chatRunner.js';
 
@@ -22,6 +22,8 @@ export interface ChatEntry {
   name: string | null;
   folder: string;
   status: string;
+  hidden: boolean;
+  snoozed: boolean;
   /** The chat's status as the server decided it (spec/12 § Chat status). */
   chatStatus?: string;
   lastUpdated?: number;
@@ -77,14 +79,22 @@ export function words(s: string): string[] {
     .filter((w) => w.length > 0);
 }
 
-/** The chats a call may name: not the Manager itself, nothing deleted (archived ones are named too). */
+/** The chats a call may name: not the Manager itself, nothing deleted (hidden, snoozed and archived ones are named too). */
 export function nameableChats(all: ChatEntry[]): ChatEntry[] {
   return all.filter((c) => c.chatId !== MANAGER_CHAT_ID && c.status !== 'deleted');
 }
 
-/** Of several chats a name fits, the one that is not archived, when only one is not. */
+/** Where a chat is kept, for the voice to say: nothing for an active chat. */
+function shelf(c: ChatEntry): 'archived' | 'hidden' | 'snoozed' | null {
+  if (c.status === 'archived') return 'archived';
+  if (c.hidden) return 'hidden';
+  if (c.snoozed) return 'snoozed';
+  return null;
+}
+
+/** Of several chats a name fits, the one that is active, when only one is. */
 function onlyCurrent(matches: ChatEntry[]): ChatEntry | undefined {
-  const current = matches.filter((c) => c.status !== 'archived');
+  const current = matches.filter((c) => shelf(c) === null);
   return current.length === 1 ? current[0] : undefined;
 }
 
@@ -122,7 +132,7 @@ export function resolveChat(listing: ChatEntry[], chat: string): ChatEntry {
   throw new ChatLookupError(
     `Several chats match "${wanted}": ${partial
       .slice(0, LIST_LIMIT)
-      .map((c) => `"${displayName(c)}"${c.status === 'archived' ? ' (archived)' : ''}`)
+      .map((c) => `"${displayName(c)}"${shelf(c) ? ` (${shelf(c)})` : ''}`)
       .join(', ')}. Ask the user which one.`,
   );
 }
@@ -160,7 +170,7 @@ function chatDetail(chatState: unknown): ChatDetail {
 }
 
 export interface ChatLookupDeps {
-  /** Every chat the account has, on every host, archived included, from the server (`patch_list_chats`). */
+  /** Every chat the account has, on every host, hidden, snoozed and archived included, from the server (`patch_list_chats`). */
   listChats(callerChatId: string): Promise<ChatEntry[]>;
   /** A chat as the server's record holds it, on any host (`patch_peek`'s `chat_state`), read on behalf of `callerChatId`. */
   peekChat(chatId: string, callerChatId: string): Promise<unknown>;
@@ -179,7 +189,8 @@ export function createChatLookup(deps: ChatLookupDeps): ChatLookup {
   const now = deps.now ?? Date.now;
 
   const line = (c: ChatEntry): string => {
-    const parts = c.status === 'archived' ? ['archived'] : [statusWords(c.chatStatus)];
+    const kept = shelf(c);
+    const parts = kept ? [kept] : [statusWords(c.chatStatus)];
     if (c.lastUpdated !== undefined) parts.push(`last active ${ago(now() - c.lastUpdated)}`);
     return `"${displayName(c)}" (id ${c.chatId}) — ${parts.join(', ')}`;
   };

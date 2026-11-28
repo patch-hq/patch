@@ -2293,12 +2293,12 @@ describe('C1 Control IPC: GET /internal/chats — the server’s list', () => {
       expect(def.json()).toEqual({ chats: serverChats });
       await app.inject({
         method: 'GET',
-        url: '/internal/chats?archived=include&callerChatId=c1',
+        url: '/internal/chats?scope=all&callerChatId=c1',
         headers: AUTH,
       });
       expect(asked).toEqual([
         ['cli', undefined],
-        ['c1', 'include'],
+        ['c1', 'all'],
       ]);
       const bad = await app.inject({
         method: 'GET',

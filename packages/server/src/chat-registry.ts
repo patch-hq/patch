@@ -1227,7 +1227,8 @@ export class ChatRegistry {
   /**
    * List chats. Default: active only (no archived, no deleted). `archivedOnly`
    * → only archived; `includeArchived` → active + archived (never deleted);
-   * `deletedOnly` → only soft-deleted (spec/04 § Lifecycle). Sorted: pinned
+   * `includeArchived` + `includeSnoozed` + `includeHidden` → every chat that is not
+   * deleted (what finding a chat by name needs); `deletedOnly` → only soft-deleted (spec/04 § Lifecycle). Sorted: pinned
    * first (by pinnedAt desc), then most-recent.
    */
   list(
@@ -1237,6 +1238,8 @@ export class ChatRegistry {
       deletedOnly?: boolean;
       snoozedOnly?: boolean;
       includeSnoozed?: boolean;
+      /** Hidden chats too (spec/04 § Hidden), with the rest of the list. */
+      includeHidden?: boolean;
       /** Only hidden chats (spec/04 § Hidden) — the sidebar's Hidden section. */
       hiddenOnly?: boolean;
       /**
@@ -1288,7 +1291,7 @@ export class ChatRegistry {
       // snooze, so a hidden chat that is also snoozed is drawn once, here.
       const hidden = c.hidden && c.status === 'active';
       if (opts.hiddenOnly) return hidden;
-      if (hidden) return false;
+      if (hidden && !opts.includeHidden) return false;
       // Snoozed chats live only in the Snoozed view until their wake time.
       if (opts.snoozedOnly) return isSnoozed(c);
       if (opts.archivedOnly) return c.status === 'archived';
@@ -1298,6 +1301,11 @@ export class ChatRegistry {
     });
     filtered.sort((a, b) => compareChatOrder(chatOrderKey(a), chatOrderKey(b), opts.order));
     return filtered;
+  }
+
+  /** True when `chat` is snoozed right now (spec/04 § Snooze). */
+  isSnoozed(chat: ChatSummary): boolean {
+    return chat.snoozedUntil !== null && chat.snoozedUntil > this.now() && chat.status === 'active';
   }
 
   /**
