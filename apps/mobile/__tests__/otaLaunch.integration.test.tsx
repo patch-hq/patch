@@ -30,6 +30,8 @@ import { useUiStore } from '../src/stores/uiStore';
 const { bootstrapSpy } = vi.hoisted(() => ({ bootstrapSpy: vi.fn(async () => undefined) }));
 vi.mock('../src/lib/bootstrap', () => ({ bootstrap: bootstrapSpy }));
 vi.mock('../src/lib/crashReport', () => ({ startCrashCapture: vi.fn() }));
+// The native call-sound player does not exist in the test runtime.
+vi.mock('../src/lib/callSounds', () => ({ preloadCallSounds: vi.fn(async () => undefined) }));
 
 import RootLayout from '../app/_layout';
 
