@@ -7,6 +7,7 @@
 // host's own wire events (the user message carrying the sent localId, running,
 // the agent's answer, idle). No request leaves this process.
 
+import { DEFAULT_SHARED_SETTINGS, relayFrom } from '@patch/wire';
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
 import { describe, test, expect, afterEach, vi } from 'vitest';
@@ -207,6 +208,7 @@ describe('audio server — a hosted call to the Manager', () => {
     });
     // The shared send, as the host wires it: only the send path of the glue is used here.
     const glue = createChatVoice({
+      relayInstructions: () => relayFrom(DEFAULT_SHARED_SETTINGS),
       daemon: {
         recordCallNote: (_chatId: string, line: string) => managerNotes.push(line),
       } as unknown as ChatVoiceHost,
@@ -309,7 +311,7 @@ describe('audio server — a hosted call to the Manager', () => {
 
     t.playTurn('c-garden', t.delivered[0]!.localId, 'Added ferns to the north bed.');
     await until(() => expect(g.clientTurns()).toHaveLength(1));
-    expect(g.clientTurns()[0]).toContain('"Garden planning" has answered');
+    expect(g.clientTurns()[0]).toContain('Chat: Garden planning');
     expect(g.clientTurns()[0]).toContain('Added ferns to the north bed.');
     expect(t.managerNotes).toEqual([
       '-> "Garden planning": put ferns in the north bed',

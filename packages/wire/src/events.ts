@@ -25,6 +25,12 @@ import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_MANAGER_PROMPT } from './manager-prompt.js';
 import { DEFAULT_MANAGER_VOICE_PROMPT } from './manager-voice-prompt.js';
 import { DEFAULT_VOICE_INSTRUCTIONS } from './voice-instructions.js';
+import {
+  DEFAULT_VOICE_RELAY_CHAT_REPLY,
+  DEFAULT_VOICE_RELAY_FAILURE,
+  DEFAULT_VOICE_RELAY_HANDOFF_ANSWER,
+  DEFAULT_VOICE_RELAY_UNPROMPTED,
+} from './voice-relay.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
   DEFAULT_VOICE_DEVICE_PROMPT,
@@ -2863,6 +2869,14 @@ export const SharedSettings = z
     managerVoicePrompt: z.string().min(1),
     /** What the voice agent on every other call is told it is (spec/07 § Voice instructions). */
     voiceInstructions: z.string().min(1),
+    /** How the voice relays a hand-off's answer (spec/07 § Pushes). */
+    voiceRelayHandoffAnswer: z.string().min(1),
+    /** How the voice relays another chat's reply to a message the call sent it. */
+    voiceRelayChatReply: z.string().min(1),
+    /** How the voice relays a message the chat's agent sent unprompted, ending its turn. */
+    voiceRelayUnprompted: z.string().min(1),
+    /** How the voice relays a request or message that failed. */
+    voiceRelayFailure: z.string().min(1),
     /** People recognised by voice on a voice device (spec/16 § Who is speaking). */
     voiceProfiles: z.array(VoiceProfile).max(VOICE_PROFILES_MAX),
     /** How sure a voice match must be (cosine similarity); Settings offers relaxed, normal and strict. */
@@ -3116,6 +3130,10 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT,
   managerVoicePrompt: DEFAULT_MANAGER_VOICE_PROMPT,
   voiceInstructions: DEFAULT_VOICE_INSTRUCTIONS,
+  voiceRelayHandoffAnswer: DEFAULT_VOICE_RELAY_HANDOFF_ANSWER,
+  voiceRelayChatReply: DEFAULT_VOICE_RELAY_CHAT_REPLY,
+  voiceRelayUnprompted: DEFAULT_VOICE_RELAY_UNPROMPTED,
+  voiceRelayFailure: DEFAULT_VOICE_RELAY_FAILURE,
   voiceProfiles: [],
   voiceMatchThreshold: VOICE_MATCH_THRESHOLD,
   dictationPauseSeconds: 10,

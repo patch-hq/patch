@@ -2,6 +2,7 @@
 // tools asked the host for, and answers with fixed text.
 
 import { vi } from 'vitest';
+import { DEFAULT_SHARED_SETTINGS, relayFrom, type VoiceRelayInstructions } from '@patch/wire';
 import type {
   SendToChatOutcome,
   StartContext,
@@ -15,6 +16,7 @@ export const FAKE_START_CONTEXT =
 export function fakeVoiceAgentLink(
   opts: {
     startContext?: () => StartContext;
+    relay?: () => VoiceRelayInstructions;
     switchChat?: () => Promise<SwitchOutcome>;
     passToAgent?: VoiceAgentLink['passToAgent'];
     sendToChat?: VoiceAgentLink['sendToChat'];
@@ -30,6 +32,7 @@ export function fakeVoiceAgentLink(
     startContext: vi.fn(
       opts.startContext ?? ((): StartContext => ({ text: FAKE_START_CONTEXT, catchUp: null })),
     ),
+    relayInstructions: opts.relay ?? (() => relayFrom(DEFAULT_SHARED_SETTINGS)),
     passToAgent: vi.fn((req) => {
       calls.push(`pass:${req.request}`);
       passed.push({ sessionId: req.sessionId, chatId: req.chatId, request: req.request });

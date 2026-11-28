@@ -88,6 +88,7 @@ import {
 } from '@patch/wire';
 import {
   DEFAULT_SHARED_SETTINGS,
+  relayFrom,
   isHostAddressedSurfaceEvent,
   OUT_OF_BAND_SEQ,
   ProviderKeyId,
@@ -1104,6 +1105,8 @@ async function startHost(
   let managerVoicePrompt: string = DEFAULT_SHARED_SETTINGS.managerVoicePrompt;
   /** spec/07 § Voice instructions — `host.settings` → `voiceInstructions`. */
   let voiceInstructions: string = DEFAULT_SHARED_SETTINGS.voiceInstructions;
+  /** spec/07 § Pushes — the four `voiceRelay*` settings, read for each push. */
+  let voiceRelay = relayFrom(DEFAULT_SHARED_SETTINGS);
   /** spec/16 § Who is speaking — `host.settings` → `voiceProfiles`. */
   let voiceProfiles: SharedSettings['voiceProfiles'] = [];
   let voiceMatchThreshold: number = DEFAULT_SHARED_SETTINGS.voiceMatchThreshold;
@@ -2566,6 +2569,7 @@ async function startHost(
       voiceInstructions = shared.voiceInstructions;
       logger.info('voice instructions changed');
     }
+    voiceRelay = relayFrom(shared);
     if (JSON.stringify(shared.voiceProfiles) !== JSON.stringify(voiceProfiles)) {
       voiceProfiles = shared.voiceProfiles;
       logger.info(
@@ -4742,6 +4746,7 @@ async function startHost(
     emitWire: (event) => emit(event),
   });
   const chatVoice = createChatVoice({
+    relayInstructions: () => voiceRelay,
     daemon: {
       recordVoiceMessage: (r) => daemon.recordVoiceMessage(r),
       updateVoiceMessage: (r) => daemon.updateVoiceMessage(r),

@@ -1,3 +1,4 @@
+import { DEFAULT_SHARED_SETTINGS, relayFrom } from '@patch/wire';
 // spec/07 § The fast voice and the chat's agent — a hand-off is written into the
 // chat when it is made, in order with what was said around it, not when the
 // agent gets to it behind work already running.
@@ -61,6 +62,7 @@ function setup(backend: SdkBackend) {
   // The voice glue, as main() wires it: it sees every event and every hand-off's start.
   const withGlue = (): ChatVoice => {
     glue = createChatVoice({
+      relayInstructions: () => relayFrom(DEFAULT_SHARED_SETTINGS),
       daemon,
       sessionsOnChat: () => [],
       ledger: createVoiceLedger(join(mkdtempSync(join(tmpdir(), 'patch-vhol-')), 'v.jsonl')),

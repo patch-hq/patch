@@ -8,6 +8,12 @@
 // requests: a long unrelated turn finishing mid-call was charged to the call)
 // and no test drove a call through the real pieces to notice.
 
+import {
+  DEFAULT_SHARED_SETTINGS,
+  DEFAULT_VOICE_RELAY_HANDOFF_ANSWER,
+  DEFAULT_VOICE_RELAY_UNPROMPTED,
+  relayFrom,
+} from '@patch/wire';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -127,6 +133,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
   });
   let server: (AudioServerHandle & { port: number }) | undefined;
   const glue = createChatVoice({
+    relayInstructions: () => relayFrom(DEFAULT_SHARED_SETTINGS),
     daemon,
     sessionsOnChat: (chatId) => server?.sessionsOnChat(chatId) ?? [],
     sessionById: (sessionId) => server?.sessionById(sessionId),
@@ -357,12 +364,12 @@ describe('a voice call, end to end', () => {
     c.gemini.say({ serverContent: { turnComplete: true } });
     let answer: string | undefined;
     await vi.waitFor(() => {
-      answer = results(c).find((t) => t.startsWith("Answer from the chat's agent"));
+      answer = results(c).find((t) => t.startsWith(DEFAULT_VOICE_RELAY_HANDOFF_ANSWER));
       expect(answer).toBeDefined();
     });
     expect(answer).toContain('check the weather');
     expect(answer).not.toContain('typed work');
-    expect(results(c).some((t) => t.startsWith("Message from the chat's agent"))).toBe(true);
+    expect(results(c).some((t) => t.startsWith(DEFAULT_VOICE_RELAY_UNPROMPTED))).toBe(true);
   });
 
   it('look_back answers from what is actually in the chat, and from nothing else', async () => {
@@ -422,13 +429,13 @@ describe('a voice call, end to end', () => {
     expect(status).toContain("The chat's agent now: working");
     w.release();
     await vi.waitFor(() => expect(results(c)).toHaveLength(1));
-    expect(results(c)[0]).toMatch(/^Answer from the chat's agent to "list the files"/);
+    expect(results(c)[0]).toContain('Request: list the files');
     c.gemini.say(speech());
     c.gemini.say({ serverContent: { turnComplete: true } });
     // Typed into the chat from elsewhere while the call is open.
     await typed(w.daemon, chatId);
     await vi.waitFor(() => expect(results(c)).toHaveLength(2));
-    expect(results(c)[1]).toMatch(/^Message from the chat's agent, ending its turn/);
+    expect(results(c)[1]).toContain(DEFAULT_VOICE_RELAY_UNPROMPTED);
     expect(results(c)[1]).toContain('typed work');
   });
 

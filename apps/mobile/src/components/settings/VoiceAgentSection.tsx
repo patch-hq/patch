@@ -472,6 +472,10 @@ function VoiceAgentRows({ preferences }: { preferences: AccountPreferences }): R
         </>
       )}
       <TextPromptLink layer="voice-instructions" preferences={preferences} />
+      <TextPromptLink layer="voice-relay-handoff-answer" preferences={preferences} />
+      <TextPromptLink layer="voice-relay-chat-reply" preferences={preferences} />
+      <TextPromptLink layer="voice-relay-unprompted" preferences={preferences} />
+      <TextPromptLink layer="voice-relay-failure" preferences={preferences} />
     </>
   );
 }
