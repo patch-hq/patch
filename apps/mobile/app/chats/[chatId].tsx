@@ -90,6 +90,7 @@ import { DelegateStrip } from '../../src/components/DelegateStrip';
 import { DELEGATE_STATUS_LABEL, delegateStatusColor } from '../../src/lib/delegateStatus';
 import { usePresenceStore } from '../../src/stores/presenceStore';
 import { useExperimentalFeatures } from '../../src/stores/settingsStore';
+import { ReachSwitch } from '../../src/components/ReachSwitch';
 import { deliveryTracker } from '../../src/lib/deliveryTracker';
 import { permissionDeliveryTracker } from '../../src/lib/permissionDeliveryTracker';
 import { openExistingSideThread } from '../../src/lib/sideThreadActions';
@@ -1276,7 +1277,8 @@ function ChatDetailBody(): React.ReactElement {
             else router.push('/settings/voice' as Href);
           }}
         />
-        {/* The Manager's own settings (spec/15 § Voice tab (Manager)). */}
+        {/* The reach switch and the Manager's own settings (spec/15 § Voice tab (Manager)). */}
+        {chatId === SPECIAL_THREAD_IDS.manager ? <ReachSwitch /> : null}
         {chatId === SPECIAL_THREAD_IDS.manager ? (
           <Pressable
             testID="chat-manager-settings"

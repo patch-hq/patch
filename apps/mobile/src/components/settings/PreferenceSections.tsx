@@ -35,6 +35,7 @@ import {
   ManagerWake,
   SPECIAL_THREAD_IDS,
   SpeechBackendSetting,
+  finishedStatusLine,
 } from '@patch/wire';
 type DictationPauseChoice = (typeof DICTATION_PAUSE_CHOICES)[number];
 import { SettingsSection } from '../SettingsSection';
@@ -224,9 +225,16 @@ function FinishedChatsControls({
 }): React.ReactElement {
   const intervals = MANAGER_WAKE_INTERVAL_CHOICES.map(String);
   const current = String(preferences.managerWakeIntervalMinutes);
+  const status = useFinishedStatusLine();
   return (
     <>
-      <Row testID="manager-wake" title="Send to the Manager" stack>
+      <Row
+        testID="manager-wake"
+        title="Send to the Manager"
+        subtitle={status}
+        subtitleTestID="manager-finished-status"
+        stack
+      >
         <Chips
           options={ManagerWake.options}
           selected={preferences.managerWake}
@@ -250,6 +258,27 @@ function FinishedChatsControls({
       ) : null}
     </>
   );
+}
+
+/** What is waiting for the Manager and when the last delivery went (spec/06 § Finished chats). */
+function useFinishedStatusLine(): string {
+  const [line, setLine] = React.useState('Loading…');
+  React.useEffect(() => {
+    let live = true;
+    const load = (): void => {
+      api
+        .managerFinished()
+        .then((s) => live && setLine(finishedStatusLine(s)))
+        .catch((e: Error) => live && setLine(`Could not read finished chats: ${e.message}`));
+    };
+    load();
+    const timer = setInterval(load, 30_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
+  return line;
 }
 
 /** Context → This session (spec/06 § Bounded context), with Clear. */

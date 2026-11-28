@@ -33,6 +33,7 @@ vi.mock('../src/api/rest', () => ({
     models: vi.fn(),
     managerHome: vi.fn(async () => ({ hostId: null })),
     getChatSession: vi.fn(async () => ({ session: null })),
+    managerFinished: vi.fn(async () => ({ waiting: 0, sending: 0, lastSent: null })),
     rotateChat: vi.fn(async () => ({ ok: true })),
     voiceUsage: vi.fn(async () => null),
     devices: vi.fn(async () => ({ devices: [] })),

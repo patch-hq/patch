@@ -1,7 +1,7 @@
 // REST client. Mirrors packages/web/src/api/rest.ts surface so screens
 // share the same call shape. NO FALLBACK — any non-2xx is thrown.
 
-import { assertVersionReport } from '@patch/wire';
+import { assertVersionReport, type ManagerFinishedStatus } from '@patch/wire';
 import type { GoalPlan } from '../stores/types';
 import type {
   SnoozeRecord,
@@ -641,6 +641,8 @@ export const api = {
       method: 'POST',
       ...(opts ? { body: opts } : {}),
     }),
+  // spec/06 § Finished chats — what is waiting and the last delivery (Settings → Manager).
+  managerFinished: () => request<ManagerFinishedStatus>('/api/manager/finished'),
   // spec/06 § Bounded context — a special thread's current session, from the
   // server's chat index (Settings → Manager → Context).
   getChatSession: (chatId: string) =>

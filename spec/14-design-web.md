@@ -1360,13 +1360,15 @@ Models for small jobs is a text field holding the shared `smallJobModels` as a c
   <host>") is shown under the field, which stays open. Clear's refusal while
   the Manager is working is shown as an error. The new rows carry titles
   only, no line beneath.
-- Prompts — Prompt (`managerPrompt`), given to the Manager at the start of
-  every session, and Voice (`managerVoicePrompt`), who the voice is on a call
+- Prompts — Prompt (`managerPrompt`), applied to each Manager turn (an edit
+  takes effect from the next turn), and Voice (`managerVoicePrompt`), who the voice is on a call
   to the Manager (`07-voice-app.md` § A call to the Manager), each Default or
   Custom like a row on the Prompts page; the rules for the call's tools are
   added after the voice prompt and are not part of its text.
 - Finished chats — Send to the Manager, pills Off / Each one / Batched
-  (`managerWake`, off by default), and
+  (`managerWake`, off by default), with one read-only line under its title
+  saying what is waiting and when the last delivery went ("2 waiting · last
+  sent 14:30", `06-threads-manager-speakers.md` § Finished chats), and
   Every, a slider of 5, 15 and 30 minutes, 1, 2, 4 and 8 hours and a day
   (`managerWakeIntervalMinutes`, default 30 minutes), usable only when Batched.
 - Context — This session, the current session's message count and when it

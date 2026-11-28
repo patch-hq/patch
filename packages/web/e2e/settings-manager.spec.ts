@@ -25,8 +25,24 @@ test.describe('Settings → Manager', () => {
         }),
       }),
     );
+    await page.route('**/api/manager/finished', (r) =>
+      r.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          waiting: 2,
+          sending: 0,
+          lastSent: { at: new Date().setHours(14, 30, 0, 0), chats: 1 },
+        }),
+      }),
+    );
     await page.goto(settingsUrl('manager'));
     await expect(page.getByTestId('settings-manager-context')).toBeVisible();
+  });
+
+  test('Finished chats shows what is waiting and when the last delivery went', async ({ page }) => {
+    await expect(page.getByTestId('manager-finished-status').locator('.set-sub')).toHaveText(
+      '2 waiting · last sent 14:30',
+    );
   });
 
   test('has Home, Prompts, Finished chats, Context and Manager, and no sweep or instructions', async ({

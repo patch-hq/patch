@@ -1,5 +1,6 @@
 // app/chats/[chatId].tsx — the Manager's header carries a settings gear that
-// opens Settings → Manager (spec/15 § Voice tab (Manager)); no other chat has it.
+// opens Settings → Manager, and the reach switch (spec/15 § Voice tab (Manager));
+// no other chat has them.
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -52,6 +53,14 @@ describe('chat-detail — Manager settings gear', () => {
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
     expect(queryHost(r.root, byTestId('chat-manager-settings'))).toBeNull();
+    expect(queryHost(r.root, byTestId('reach-switch'))).toBeNull();
+  });
+
+  it('the Manager’s top bar carries the reach switch', () => {
+    seed(SPECIAL_THREAD_IDS.manager);
+    __setLocalSearchParams({ chatId: SPECIAL_THREAD_IDS.manager });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findHost(r.root, byTestId('reach-switch'))).toBeTruthy();
   });
 
   it('the Manager’s gear opens Settings → Manager', () => {
