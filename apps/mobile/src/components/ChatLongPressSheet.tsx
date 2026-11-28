@@ -199,18 +199,16 @@ export function deleteChatRow(row: ChatRowT): void {
 }
 
 /**
- * Optimistic snooze with an honest revert. A rejected request (the server 400s a
- * past `snoozedUntil`, spec/04 § Snooze) puts the previous value back and shows
- * the error — never a silent no-op, and never a quietly-corrected time.
+ * Unsnooze with an honest revert. Snoozing itself has one path only
+ * (`applySnoozeSet` in lib/snoozeApply), which also moves you on from the open
+ * chat; this one only brings a chat back, so it has nowhere to navigate.
  */
-export function applySnooze(chatId: string, snoozedUntil: number | null): void {
+export function unsnoozeChat(chatId: string): void {
   const previous = useChatStore.getState().chats[chatId]?.snoozedUntil ?? null;
-  useChatStore.getState().setSnoozed(chatId, snoozedUntil);
-  void api.snoozeChat(chatId, snoozedUntil).catch((e: Error) => {
+  useChatStore.getState().setSnoozed(chatId, null);
+  void api.snoozeChat(chatId, null).catch((e: Error) => {
     useChatStore.getState().setSnoozed(chatId, previous);
-    useUiStore
-      .getState()
-      .pushError(`${snoozedUntil === null ? 'unsnooze' : 'snooze'} failed: ${e.message}`);
+    useUiStore.getState().pushError(`unsnooze failed: ${e.message}`);
   });
 }
 
@@ -357,7 +355,7 @@ export function ChatLongPressSheet(): React.ReactElement {
                     label="Unsnooze chat"
                     onPress={() => {
                       close();
-                      applySnooze(row.chatId, null);
+                      unsnoozeChat(row.chatId);
                     }}
                   />
                 ) : (

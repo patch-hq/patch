@@ -8,7 +8,7 @@
 //                  hidden chat, spec/04 § Hidden). Re-added alongside the
 //                  ⋯/long-press sheet (not instead of it — Delete and "Send
 //                  voice note" stay sheet-only) via `toggleArchive`/
-//                  `togglePin`/`applySnooze`, the exact functions the sheet's
+//                  `togglePin`/`unsnoozeChat`, the exact functions the sheet's
 //                  own Items call, so a swipe and a sheet tap do the same
 //                  thing rather than being two competing implementations.
 //
@@ -41,7 +41,7 @@ import { rowBack } from '@patch/wire';
 import { fonts, radii, space, typography, useTheme } from '../lib/theme';
 import { useChatStore } from '../stores/chatStore';
 import {
-  applySnooze,
+  unsnoozeChat,
   showChatLongPressSheet,
   showChatSnoozeSheet,
   showHiddenChat,
@@ -203,7 +203,7 @@ export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.Reac
         label={isSnoozed(row) ? 'Unsnooze chat' : 'Snooze chat'}
         onPress={() => {
           closeTray();
-          if (isSnoozed(row)) applySnooze(row.chatId, null);
+          if (isSnoozed(row)) unsnoozeChat(row.chatId);
           else showChatSnoozeSheet(row);
         }}
       />

@@ -13,7 +13,7 @@ import { AlarmClock } from 'lucide-react-native';
 import type { ChatRow } from '../stores/types';
 import { isSnoozed } from '../stores/types';
 import { formatWakeTime } from '../lib/snooze';
-import { applySnooze } from './ChatLongPressSheet';
+import { unsnoozeChat } from './ChatLongPressSheet';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 export function SnoozedBanner({ row }: { row: ChatRow | undefined }): ReactElement | null {
@@ -53,7 +53,7 @@ export function SnoozedBanner({ row }: { row: ChatRow | undefined }): ReactEleme
       <Pressable
         testID="unsnooze-banner-btn"
         accessibilityLabel="Unsnooze chat"
-        onPress={() => applySnooze(row.chatId, null)}
+        onPress={() => unsnoozeChat(row.chatId)}
         hitSlop={10}
         style={{ alignSelf: 'center' }}
       >

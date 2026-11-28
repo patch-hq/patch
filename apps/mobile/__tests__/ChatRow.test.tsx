@@ -28,7 +28,7 @@ import type { ChatRow as ChatRowT } from '../src/stores/types';
 import { useChatStore } from '../src/stores/chatStore';
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
 import {
-  applySnooze,
+  unsnoozeChat,
   showChatLongPressSheet,
   showChatSnoozeSheet,
   toggleArchive,
@@ -51,7 +51,7 @@ vi.mock('../src/components/ChatLongPressSheet', () => ({
   showChatSnoozeSheet: vi.fn(),
   toggleArchive: vi.fn(),
   togglePin: vi.fn(),
-  applySnooze: vi.fn(),
+  unsnoozeChat: vi.fn(),
 }));
 
 function makeRow(overrides: Partial<ChatRowT> = {}): ChatRowT {
@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.mocked(showChatSnoozeSheet).mockClear();
   vi.mocked(toggleArchive).mockClear();
   vi.mocked(togglePin).mockClear();
-  vi.mocked(applySnooze).mockClear();
+  vi.mocked(unsnoozeChat).mockClear();
 });
 
 describe('ChatRowItem — waiting for sign-in', () => {
@@ -375,11 +375,11 @@ describe('ChatRowItem — swipe-to-reveal tray (spec/15 § Row tools)', () => {
     expect(showChatSnoozeSheet).toHaveBeenCalledWith(makeRow({ snoozedUntil: null }));
   });
 
-  it('the tray Snooze button unsnoozes directly (via applySnooze) when already snoozed', () => {
+  it('the tray Snooze button unsnoozes directly (via unsnoozeChat) when already snoozed', () => {
     const row = makeRow({ snoozedUntil: Date.now() + 60_000 });
     const r = renderRN(<ChatRowItem row={row} />);
     findHost(leftTrayOf(r), (i) => i.props.accessibilityLabel === 'Unsnooze chat').props.onPress();
-    expect(applySnooze).toHaveBeenCalledWith(row.chatId, null);
+    expect(unsnoozeChat).toHaveBeenCalledWith(row.chatId);
   });
 });
 
