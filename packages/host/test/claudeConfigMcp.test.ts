@@ -46,6 +46,8 @@ describe('discoverClaudeMcpServers', () => {
       args: ['@playwright/mcp@latest', '--headless'],
       env: {},
       enabled: true,
+      voice: false,
+      voiceOff: [],
     });
   });
 
@@ -57,7 +59,15 @@ describe('discoverClaudeMcpServers', () => {
     });
     const servers = discoverClaudeMcpServers('/wherever', home);
     expect(servers).toEqual([
-      { name: 'mine', command: 'from-claude-json', args: [], env: {}, enabled: true },
+      {
+        name: 'mine',
+        command: 'from-claude-json',
+        args: [],
+        env: {},
+        enabled: true,
+        voice: false,
+        voiceOff: [],
+      },
     ]);
   });
 
@@ -70,10 +80,26 @@ describe('discoverClaudeMcpServers', () => {
       },
     });
     expect(discoverClaudeMcpServers('/my/project', home)).toEqual([
-      { name: 'mine', command: 'project-local', args: [], env: {}, enabled: true },
+      {
+        name: 'mine',
+        command: 'project-local',
+        args: [],
+        env: {},
+        enabled: true,
+        voice: false,
+        voiceOff: [],
+      },
     ]);
     expect(discoverClaudeMcpServers('/some/other/project', home)).toEqual([
-      { name: 'mine', command: 'global', args: [], env: {}, enabled: true },
+      {
+        name: 'mine',
+        command: 'global',
+        args: [],
+        env: {},
+        enabled: true,
+        voice: false,
+        voiceOff: [],
+      },
     ]);
   });
 
@@ -91,7 +117,15 @@ describe('discoverClaudeMcpServers', () => {
     );
     writeClaudeJson(home, { projects: { [folder]: { enabledMcpjsonServers: ['trusted'] } } });
     expect(discoverClaudeMcpServers(folder, home)).toEqual([
-      { name: 'trusted', command: 'trusted-cmd', args: [], env: {}, enabled: true },
+      {
+        name: 'trusted',
+        command: 'trusted-cmd',
+        args: [],
+        env: {},
+        enabled: true,
+        voice: false,
+        voiceOff: [],
+      },
     ]);
   });
 
