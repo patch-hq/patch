@@ -200,6 +200,20 @@ describe('AwaitingPermissionNotifier', () => {
     expect(routed).toHaveLength(0);
   });
 
+  test('a question left open when a turn ended is still described when the next turn blocks on it', () => {
+    seedRunning('c1', { name: 'bed planner' });
+    feed(
+      permissionRequest('c1', { tool: 'AskUserQuestion', args: questionArgs('OAuth or API key?') }),
+    );
+    // The turn ends with the question still open: the chat reads idle.
+    feed(state('c1', { activity: 'idle' }));
+    // The user writes again; the open question holds the new turn.
+    feed(state('c1', { activity: 'running' }));
+    feed(state('c1', { activity: 'awaiting-permission' }));
+    expect(channels()).toEqual(['desktop', 'push']);
+    expect(routed[0]?.event.message).toBe('bed planner asks: OAuth or API key?');
+  });
+
   // --- The edge -----------------------------------------------------------
 
   test('a repeated awaiting-permission state does not notify again', () => {
