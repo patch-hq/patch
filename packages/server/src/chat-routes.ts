@@ -31,6 +31,7 @@ import {
   isReservedSpecialThread,
   pickAvailableModel,
   ReminderEvery,
+  SPECIAL_THREAD_IDS,
   TodoItem,
 } from '@patch/wire';
 import type {
@@ -2384,6 +2385,16 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       const carry = req.body?.carry;
       if (carry !== undefined && typeof carry !== 'boolean') {
         return reply.code(400).send({ error: 'carry must be true or false' });
+      }
+      // The host refuses a thread mid-turn and nothing would answer this
+      // request with it, so the refusal is made here where it can be seen.
+      const activity = deps.chatRegistry.get(req.params.id)!.activity;
+      if (activity === 'running' || activity === 'awaiting-permission') {
+        const name = req.params.id === SPECIAL_THREAD_IDS.manager ? 'the Manager' : 'Speakers';
+        const action = carry === false ? 'clear' : 'rotate';
+        return reply.code(409).send({
+          error: `Cannot ${action} ${name} while it is working. Try again when the turn has finished.`,
+        });
       }
       deps.hostLink.send(auth.surfaceId, {
         type: 'chat.rotate_request',

@@ -84,6 +84,20 @@ test.describe('Settings → Manager', () => {
     expect((await rotate).postDataJSON()).toEqual({ carry: false });
   });
 
+  test('Clear while the Manager is working shows the server’s refusal', async ({ page }) => {
+    const message =
+      'Cannot clear the Manager while it is working. Try again when the turn has finished.';
+    await page.route('**/api/chats/thread_manager/rotate', (r) =>
+      r.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: message }),
+      }),
+    );
+    await page.getByTestId('manager-clear').click();
+    await expect(page.getByTestId('error-toasts')).toContainText(message);
+  });
+
   test('the Manager prompt saves as Custom', async ({ page }) => {
     await page.getByTestId('prompt-manager-mode-custom').click();
     await page.getByTestId('prompt-manager-text').fill('Answer in one line.');
