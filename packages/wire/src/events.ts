@@ -3720,6 +3720,18 @@ export const HostInfoEvent = z
      */
     acpLogin: z.boolean().optional(),
     /**
+     * This host delivers finished chats to the Manager (`manager.finished_run`).
+     * Optional: an older host never says, and is never sent one; its chats are
+     * kept until it is updated (spec/06 § Finished chats).
+     */
+    managerFinished: z.boolean().optional(),
+    /**
+     * This host honours `chat.rotate_request.carry: false` (Clear). Optional: an
+     * older host never says and would strip the flag, rotating with carry-over,
+     * so Clear is refused for it.
+     */
+    managerClear: z.boolean().optional(),
+    /**
      * Where the SERVER can reach this host's own audio WSS (`<host>:<port>`,
      * no scheme) to relay a voice session for a chat that lives here but was
      * opened from a surface that only reaches the server (spec/07 § Voice is

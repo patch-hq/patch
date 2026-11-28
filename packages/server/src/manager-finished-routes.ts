@@ -1,4 +1,5 @@
-// Finished chats → the Manager: deliver now (spec/06 § Finished chats, `patch threads send-finished`).
+// Finished chats → the Manager: what is waiting, and deliver now (spec/06 § Finished chats,
+// `patch threads finished` / `send-finished`).
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { verifySurfaceCredential } from '@patch/auth';
@@ -50,10 +51,17 @@ export function registerManagerFinishedRoutes(
   app: FastifyInstance,
   deps: ManagerFinishedRoutesDeps,
 ): void {
-  // Nothing finished since the last delivery (or the setting off) is
-  // `sent: false`, not an error.
+  // What happened, named: nothing waiting, a delivery already in flight, sent
+  // N chats, or refused with the reason. `sent` stays for older CLIs.
   app.post('/api/manager/finished/send-now', async (req, reply) => {
     if (!(await authOr401(req, reply, deps.registry))) return;
-    return reply.code(200).send({ sent: deps.collector.sendNow() });
+    const result = deps.collector.sendNow();
+    return reply.code(200).send({ sent: result.outcome === 'sent', ...result });
+  });
+
+  // What is waiting and when the last delivery went (Settings → Manager, `patch threads finished`).
+  app.get('/api/manager/finished', async (req, reply) => {
+    if (!(await authOr401(req, reply, deps.registry))) return;
+    return reply.code(200).send(deps.collector.status());
   });
 }

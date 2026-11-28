@@ -213,6 +213,8 @@ export interface ChatRoutesDeps {
    * default as is.
    */
   accountReport?: (hostId: string, backendId: string) => ReportedBackend | undefined;
+  /** Whether a host honours Clear (`host.host.managerClear`); an older host would rotate with carry-over. */
+  hostTakesClear: (hostId: string) => boolean;
   /** Override the spawn-error wait window for tests. */
   spawnErrorWaitMs?: number;
   /**
@@ -2395,6 +2397,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         return reply.code(409).send({
           error: `Cannot ${action} ${name} while it is working. Try again when the turn has finished.`,
         });
+      }
+      const hostId = deps.chatRegistry.get(req.params.id)!.hostId;
+      if (carry === false && !deps.hostTakesClear(hostId)) {
+        const name = deps.registry.hostName(hostId) ?? hostId;
+        return reply.code(409).send({ error: `${name} needs updating to clear the Manager` });
       }
       deps.hostLink.send(auth.surfaceId, {
         type: 'chat.rotate_request',

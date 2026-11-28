@@ -924,6 +924,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       const id = specialThreadHost();
       return id && hostLink.onlineHostIds().includes(id) ? id : undefined;
     },
+    hostTakesFinished: (hostId) => wsHub.hostManagerFinished(hostId),
     hostName: (hostId) => registry.hostName(hostId),
     deliver: (req) => {
       const id = specialThreadHost();
@@ -2231,6 +2232,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     chatLogStore,
     idGenerator,
     accountReport: (hostId, backendId) => wsHub.accountReport(hostId, backendId),
+    hostTakesClear: (hostId) => wsHub.hostManagerClear(hostId),
     broadcastChatState: (event) => wsHub.broadcastChatState(event),
     // The account's default model, applied to any spawn that names none. Read
     // per request so a change in Settings reaches the next spawn.

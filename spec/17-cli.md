@@ -120,7 +120,8 @@ patch message-hooks enable <id> | disable <id>
 
 patch threads list                        # the special threads (Manager, Speakers)
 patch threads send-to <name> <message>    # = chats send-to but by thread name
-patch threads send-finished               # deliver the chats finished so far to the Manager now (06 § Finished chats)
+patch threads finished                    # what is waiting for the Manager and the last delivery (06 § Finished chats)
+patch threads send-finished               # deliver now: nothing waiting / already in flight / sent N / refused: <reason> (exit 1)
 
 patch surfaces list                       # connected devices/sessions
 patch surfaces ping <id>                  # heartbeat probe

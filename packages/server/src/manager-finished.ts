@@ -14,6 +14,7 @@ import type {
   ChatStateEvent,
   ManagerFinishedChat,
   ManagerFinishedResultEvent,
+  ManagerFinishedStatus,
   WireEvent,
 } from '@patch/wire';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
@@ -32,8 +33,22 @@ export const RETRY_AFTER_FAILURE_MS = 5 * 60_000;
 
 const SPECIAL_IDS: ReadonlySet<string> = new Set(Object.values(SPECIAL_THREAD_IDS));
 
-/** What survives a server restart: the chats still to deliver and the batch clock. */
+/** What survives a server restart: the chats still to deliver, the batch window and the last delivery. */
 const StoredFile = z
+  .object({
+    version: z.literal(2),
+    pending: z.array(z.string().min(1)),
+    /** When the first chat joined an empty batch; null while nothing is waiting. */
+    windowStartedAt: z.number().int().nonnegative().nullable(),
+    lastSent: z
+      .object({ at: z.number().int().nonnegative(), chats: z.number().int().positive() })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+
+/** The first release's file: its clock ran from the last delivery, and it kept no last delivery. */
+const StoredFileV1 = z
   .object({
     version: z.literal(1),
     pending: z.array(z.string().min(1)),
@@ -41,11 +56,23 @@ const StoredFile = z
   })
   .strict();
 
+/** What `patch threads send-finished` did. */
+export type SendFinishedOutcome =
+  | { outcome: 'nothing-waiting' }
+  | { outcome: 'in-flight'; chats: number }
+  | { outcome: 'sent'; chats: number }
+  | { outcome: 'refused'; reason: string };
+
 export interface ManagerFinishedDeps {
   chats: ChatRegistry;
   settings: () => AccountSettings;
   /** The Manager's home host when it is online, else undefined. */
   managerHostId: () => string | undefined;
+  /**
+   * Whether the host takes `manager.finished_run` (`host.host.managerFinished`);
+   * undefined until it has described itself since connecting.
+   */
+  hostTakesFinished: (hostId: string) => boolean | undefined;
   /** The name the user gave a host, when it has one. */
   hostName?: (hostId: string) => string | undefined;
   /** Ask the home host to deliver (fire-and-forget; the result arrives via `onResult`). */
@@ -55,7 +82,7 @@ export interface ManagerFinishedDeps {
    * so itself (the home host never answered, or answered without writing it).
    */
   reportFailure?: (message: string) => void;
-  /** Where the pending chats and batch clock are kept; memory only when absent. */
+  /** Where the pending chats, batch window and last delivery are kept; memory only when absent. */
   path?: string;
   logger: Pick<Logger, 'info' | 'warn' | 'error'>;
   now?: () => number;
@@ -71,7 +98,11 @@ export class ManagerFinishedCollector {
   private readonly lastActivity = new Map<string, ChatSummaryActivity>();
   /** Each chat's goal as last seen, so a goal being cleared on an idle chat is noticed. */
   private readonly lastGoal = new Map<string, string | null>();
-  private lastDeliveryAt: number;
+  /** When the first chat joined an empty batch; the batched interval runs from here. */
+  private windowStartedAt: number | null = null;
+  private lastSent: { at: number; chats: number } | null = null;
+  /** The home host that has been reported as too old, so it is said once. */
+  private outdatedReported: string | undefined;
   /** The delivery whose result has not come back — one at a time — and its chats. */
   private inFlight: { runId: string; since: number; chats: string[] } | undefined;
   /** Set after a failed delivery: its chats are sent again once this passes. */
@@ -84,9 +115,6 @@ export class ManagerFinishedCollector {
     this.now = deps.now ?? (() => Date.now());
     this.idGenerator =
       deps.idGenerator ?? (() => `finished-${this.now()}-${Math.random().toString(36).slice(2)}`);
-    // Boot counts as "just delivered" when nothing was kept, so the batch
-    // clock does not read as overdue the moment the server starts.
-    this.lastDeliveryAt = this.now();
     this.load();
   }
 
@@ -105,9 +133,17 @@ export class ManagerFinishedCollector {
       return;
     }
     try {
-      const stored = StoredFile.parse(JSON.parse(text));
+      const json: unknown = JSON.parse(text);
+      const v1 = StoredFileV1.safeParse(json);
+      if (v1.success) {
+        this.pending = new Set(v1.data.pending);
+        if (this.pending.size > 0) this.windowStartedAt = v1.data.lastDeliveryAt;
+        return;
+      }
+      const stored = StoredFile.parse(json);
       this.pending = new Set(stored.pending);
-      this.lastDeliveryAt = stored.lastDeliveryAt;
+      this.windowStartedAt = this.pending.size > 0 ? stored.windowStartedAt : null;
+      this.lastSent = stored.lastSent;
     } catch (err) {
       // Re-derivable: losing it costs one batch of finished chats, never the
       // server. Loud, so a broken file is seen.
@@ -124,9 +160,10 @@ export class ManagerFinishedCollector {
     if (path === undefined) return;
     const pending = [...new Set([...(this.inFlight?.chats ?? []), ...this.pending])];
     const body: z.infer<typeof StoredFile> = {
-      version: 1,
+      version: 2,
       pending,
-      lastDeliveryAt: this.lastDeliveryAt,
+      windowStartedAt: this.windowStartedAt,
+      lastSent: this.lastSent,
     };
     try {
       mkdirSync(dirname(path), { recursive: true });
@@ -154,6 +191,21 @@ export class ManagerFinishedCollector {
     this.failureReported = false;
     if (this.pending.size === 0) return;
     this.pending.clear();
+    this.windowStartedAt = null;
+    this.save();
+  }
+
+  /** The batch window opens when the first chat joins an empty batch, not at the last delivery. */
+  private addPending(chatId: string): void {
+    if (this.pending.has(chatId)) return;
+    if (this.pending.size === 0) this.windowStartedAt = this.now();
+    this.pending.add(chatId);
+    this.save();
+  }
+
+  private removePending(chatId: string): void {
+    if (!this.pending.delete(chatId)) return;
+    if (this.pending.size === 0) this.windowStartedAt = null;
     this.save();
   }
 
@@ -171,7 +223,7 @@ export class ManagerFinishedCollector {
     if (SPECIAL_IDS.has(chatId)) return;
     // It started working again before the delivery went: it has not finished.
     if (event.activity === 'running') {
-      if (this.pending.delete(chatId)) this.save();
+      this.removePending(chatId);
       return;
     }
     // Off means nothing is collected, so no backlog floods in when it is turned on.
@@ -187,10 +239,7 @@ export class ManagerFinishedCollector {
       this.lastActivity.get(chatId) === 'idle';
     if (!wentIdle && !goalEnded) return;
     if (!this.eligible(chatId)) return;
-    if (!this.pending.has(chatId)) {
-      this.pending.add(chatId);
-      this.save();
-    }
+    this.addPending(chatId);
     if (this.deps.settings().managerWake === 'each') this.attempt();
   }
 
@@ -227,36 +276,46 @@ export class ManagerFinishedCollector {
     };
   }
 
-  private attempt(force = false): boolean {
+  private attempt(force = false): SendFinishedOutcome {
     if (this.isOff()) {
       this.clearPending();
-      return false;
+      return {
+        outcome: 'refused',
+        reason:
+          this.deps.settings().managerWake === 'off'
+            ? 'finished chats are off'
+            : 'the Manager is disabled',
+      };
     }
-    if (this.pending.size === 0) return false;
     if (this.inFlight !== undefined) {
-      if (this.now() - this.inFlight.since < IN_FLIGHT_STALE_MS) return false;
+      if (this.now() - this.inFlight.since < IN_FLIGHT_STALE_MS) {
+        return { outcome: 'in-flight', chats: this.inFlight.chats.length };
+      }
       this.deps.logger.warn(
         { runId: this.inFlight.runId },
         'manager-finished: delivery never reported back, no longer waiting for it',
       );
       this.failed('the Manager’s home host did not answer', false);
     }
-    if (!force && this.retryAfter !== undefined && this.now() < this.retryAfter) return false;
-    const hostId = this.deps.managerHostId();
-    // Kept for when the home host is back.
-    if (!hostId) return false;
+    if (this.pending.size === 0) return { outcome: 'nothing-waiting' };
+    if (!force && this.retryAfter !== undefined && this.now() < this.retryAfter) {
+      return { outcome: 'refused', reason: 'a delivery failed; retrying shortly' };
+    }
+    const held = this.heldBy();
+    // Kept for when the home host is back, or updated.
+    if (held !== undefined) return { outcome: 'refused', reason: held.reason };
     const settings = this.deps.settings();
     const chats = [...this.pending]
       .map((id) => this.toChat(id))
       .filter((c): c is ManagerFinishedChat => c !== undefined);
     this.pending.clear();
-    this.lastDeliveryAt = this.now();
+    this.windowStartedAt = null;
     if (chats.length === 0) {
       this.save();
-      return false;
+      return { outcome: 'nothing-waiting' };
     }
     const runId = this.idGenerator();
-    this.inFlight = { runId, since: this.lastDeliveryAt, chats: chats.map((c) => c.chatId) };
+    this.inFlight = { runId, since: this.now(), chats: chats.map((c) => c.chatId) };
     this.save();
     const batched = settings.managerWake === 'batched' && !force;
     try {
@@ -271,10 +330,33 @@ export class ManagerFinishedCollector {
         'manager-finished: delivery could not be sent',
       );
       this.failed((err as Error).message, false);
-      return false;
+      return { outcome: 'refused', reason: (err as Error).message };
     }
     this.deps.logger.info({ runId, chats: chats.length }, 'manager-finished: delivery requested');
-    return true;
+    return { outcome: 'sent', chats: chats.length };
+  }
+
+  /**
+   * Why a delivery cannot go to the home host now, if it cannot: offline, not
+   * yet described, or too old to take `manager.finished_run`. A host too old
+   * is told to the user once, until it is updated or the home moves.
+   */
+  private heldBy(report = true): { reason: string } | undefined {
+    const hostId = this.deps.managerHostId();
+    if (!hostId) return { reason: 'the Manager’s home host is offline' };
+    const takes = this.deps.hostTakesFinished(hostId);
+    if (takes === undefined) return { reason: 'the Manager’s home host is still connecting' };
+    if (takes) {
+      if (report) this.outdatedReported = undefined;
+      return undefined;
+    }
+    const message = `Manager host ${this.deps.hostName?.(hostId) ?? hostId} needs updating for finished chats`;
+    if (report && this.outdatedReported !== hostId) {
+      this.outdatedReported = hostId;
+      this.deps.logger.warn({ hostId }, 'manager-finished: home host too old, chats kept');
+      this.deps.reportFailure?.(message);
+    }
+    return { reason: message };
   }
 
   /**
@@ -292,6 +374,7 @@ export class ManagerFinishedCollector {
       return;
     }
     this.pending = new Set([...chats, ...this.pending]);
+    if (this.pending.size > 0) this.windowStartedAt ??= this.now();
     this.retryAfter = this.now() + RETRY_AFTER_FAILURE_MS;
     this.save();
     if (this.failureReported) return;
@@ -315,16 +398,32 @@ export class ManagerFinishedCollector {
     }
     const settings = this.deps.settings();
     // A failed delivery's chats go again when the pause is over, not at the next interval.
-    if (settings.managerWake === 'batched' && this.retryAfter === undefined) {
-      const intervalMs = settings.managerWakeIntervalMinutes * 60_000;
-      if (this.now() - this.lastDeliveryAt < intervalMs) return false;
+    if (
+      settings.managerWake === 'batched' &&
+      this.retryAfter === undefined &&
+      this.windowStartedAt !== null &&
+      this.now() - this.windowStartedAt < settings.managerWakeIntervalMinutes * 60_000
+    ) {
+      return false;
     }
-    return this.attempt();
+    return this.attempt().outcome === 'sent';
   }
 
   /** Deliver what has finished so far, now (`patch threads send-finished`). */
-  sendNow(): boolean {
+  sendNow(): SendFinishedOutcome {
     return this.attempt(true);
+  }
+
+  /** What is waiting and when the last delivery went (Settings → Manager, `patch threads finished`). */
+  status(): ManagerFinishedStatus {
+    const waiting = this.pending.size;
+    const held = waiting > 0 && !this.isOff() ? this.heldBy(false) : undefined;
+    return {
+      waiting,
+      sending: this.inFlight?.chats.length ?? 0,
+      lastSent: this.lastSent,
+      ...(held ? { held: held.reason } : {}),
+    };
   }
 
   onResult(
@@ -345,6 +444,7 @@ export class ManagerFinishedCollector {
       this.failed(event.error, event.recorded === true);
       return;
     }
+    if (event.delivered > 0) this.lastSent = { at: this.now(), chats: event.delivered };
     this.inFlight = undefined;
     this.retryAfter = undefined;
     this.failureReported = false;

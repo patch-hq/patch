@@ -47,6 +47,7 @@ describe('ManagerFinishedCollector', () => {
   let collector: ManagerFinishedCollector;
   let nowMs: number;
   let hostOnline: boolean;
+  let hostTakes: boolean | undefined;
   let reported: string[];
 
   function make(over: Partial<ManagerFinishedDeps> = {}): ManagerFinishedCollector {
@@ -54,6 +55,7 @@ describe('ManagerFinishedCollector', () => {
       chats,
       settings: () => settings,
       managerHostId: () => (hostOnline ? 'd1' : undefined),
+      hostTakesFinished: () => hostTakes,
       hostName: (id) => (id === 'd1' ? 'Studio Mac' : undefined),
       deliver: (req) => delivered.push(req),
       reportFailure: (m) => reported.push(m),
@@ -82,6 +84,7 @@ describe('ManagerFinishedCollector', () => {
     chats = new ChatRegistry({ logger });
     delivered = [];
     hostOnline = true;
+    hostTakes = true;
     settings = { ...DEFAULT_SETTINGS, managerWake: 'batched', managerWakeIntervalMinutes: 30 };
     nowMs = 1_700_000_000_000;
     reported = [];
@@ -303,7 +306,7 @@ describe('ManagerFinishedCollector', () => {
     collector = make({ path });
     expect(collector.pendingChats()).toEqual(['c1', 'c2']);
     expect(existsSync(`${path}.tmp`)).toBe(false);
-    expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ version: 1 });
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ version: 2 });
   });
 
   test('an unreadable file is logged and the collector starts empty', () => {
@@ -340,8 +343,139 @@ describe('ManagerFinishedCollector', () => {
 
   test('send now: delivers before the interval, without naming one', () => {
     finish('c1');
-    expect(collector.sendNow()).toBe(true);
+    expect(collector.sendNow()).toEqual({ outcome: 'sent', chats: 1 });
     expect(delivered[0]!.windowMinutes).toBeUndefined();
-    expect(collector.sendNow()).toBe(false);
+  });
+
+  test('send now names what happened: nothing waiting, in flight, sent, refused', () => {
+    expect(collector.sendNow()).toEqual({ outcome: 'nothing-waiting' });
+    finish('c1');
+    finish('c2');
+    expect(collector.sendNow()).toEqual({ outcome: 'sent', chats: 2 });
+    expect(collector.sendNow()).toEqual({ outcome: 'in-flight', chats: 2 });
+    collector.onResult({ runId: 'run-0', delivered: 2 });
+    finish('c3');
+    hostOnline = false;
+    expect(collector.sendNow()).toEqual({
+      outcome: 'refused',
+      reason: 'the Manager’s home host is offline',
+    });
+    settings = { ...settings, managerWake: 'off' };
+    expect(collector.sendNow()).toEqual({ outcome: 'refused', reason: 'finished chats are off' });
+  });
+
+  test('batched after a quiet spell: the window starts when the first chat joins, not at the last delivery', () => {
+    finish('c1');
+    nowMs += 30 * 60_000;
+    expect(collector.tick()).toBe(true);
+    collector.onResult({ runId: 'run-0', delivered: 1 });
+    // Hours pass with nothing finishing.
+    nowMs += 5 * 60 * 60_000;
+    expect(collector.tick()).toBe(false);
+    finish('c2');
+    // The first finish after the quiet waits the full interval.
+    expect(collector.tick()).toBe(false);
+    nowMs += 29 * 60_000;
+    finish('c3');
+    expect(collector.tick()).toBe(false);
+    nowMs += 60_000;
+    expect(collector.tick()).toBe(true);
+    expect(ids(1)).toEqual(['c2', 'c3']);
+  });
+
+  test('the window closes when the batch empties: a chat that ran again does not keep it open', () => {
+    finish('c1');
+    emit(state('c1', { activity: 'running' }));
+    nowMs += 40 * 60_000;
+    emit(state('c1', { activity: 'idle' }));
+    expect(collector.tick()).toBe(false);
+    nowMs += 30 * 60_000;
+    expect(collector.tick()).toBe(true);
+  });
+
+  test('the window start survives a restart', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'mf-')), 'manager-finished.json');
+    collector = make({ path });
+    nowMs += 3 * 60 * 60_000;
+    finish('c1');
+    nowMs += 20 * 60_000;
+    collector = make({ path });
+    expect(collector.tick()).toBe(false);
+    nowMs += 10 * 60_000;
+    expect(collector.tick()).toBe(true);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({
+      version: 2,
+      windowStartedAt: null,
+    });
+  });
+
+  test('a file from the first release loads: its chats and their clock are kept', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'mf-')), 'manager-finished.json');
+    emit(spawned('c1'));
+    writeFileSync(
+      path,
+      JSON.stringify({ version: 1, pending: ['c1'], lastDeliveryAt: nowMs - 25 * 60_000 }),
+    );
+    collector = make({ path });
+    expect(collector.pendingChats()).toEqual(['c1']);
+    expect(collector.tick()).toBe(false);
+    nowMs += 5 * 60_000;
+    expect(collector.tick()).toBe(true);
+  });
+
+  test('a home host too old for finished chats keeps them and says so once', () => {
+    settings = { ...settings, managerWake: 'each' };
+    hostTakes = false;
+    finish('c1');
+    finish('c2');
+    collector.tick();
+    expect(delivered).toEqual([]);
+    expect(collector.pendingChats()).toEqual(['c1', 'c2']);
+    expect(reported).toEqual(['Manager host Studio Mac needs updating for finished chats']);
+    expect(collector.sendNow()).toEqual({
+      outcome: 'refused',
+      reason: 'Manager host Studio Mac needs updating for finished chats',
+    });
+    expect(collector.status()).toMatchObject({
+      waiting: 2,
+      held: 'Manager host Studio Mac needs updating for finished chats',
+    });
+    expect(reported).toHaveLength(1);
+    // Updated: the kept chats go.
+    hostTakes = true;
+    expect(collector.tick()).toBe(true);
+    expect(ids(0)).toEqual(['c1', 'c2']);
+    // Too old again later (a downgrade) is a new condition, said again.
+    collector.onResult({ runId: 'run-0', delivered: 2 });
+    hostTakes = false;
+    finish('c3');
+    expect(reported).toHaveLength(2);
+  });
+
+  test('a home host that has not described itself yet is waited for, silently', () => {
+    settings = { ...settings, managerWake: 'each' };
+    hostTakes = undefined;
+    finish('c1');
+    expect(delivered).toEqual([]);
+    expect(reported).toEqual([]);
+    hostTakes = true;
+    expect(collector.tick()).toBe(true);
+  });
+
+  test('status: what is waiting, what is being sent, and the last delivery', () => {
+    expect(collector.status()).toEqual({ waiting: 0, sending: 0, lastSent: null });
+    finish('c1');
+    finish('c2');
+    expect(collector.status()).toEqual({ waiting: 2, sending: 0, lastSent: null });
+    collector.sendNow();
+    finish('c3');
+    expect(collector.status()).toEqual({ waiting: 1, sending: 2, lastSent: null });
+    nowMs += 1000;
+    collector.onResult({ runId: 'run-0', delivered: 2 });
+    expect(collector.status()).toEqual({
+      waiting: 1,
+      sending: 0,
+      lastSent: { at: nowMs, chats: 2 },
+    });
   });
 });

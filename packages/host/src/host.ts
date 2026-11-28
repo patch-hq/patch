@@ -64,6 +64,8 @@ export interface HostDescriptionInput {
   limitFacts?: boolean | undefined;
   /** Runs an ACP agent's own sign-in (`acp.login_request`). */
   acpLogin?: boolean | undefined;
+  managerFinished?: boolean | undefined;
+  managerClear?: boolean | undefined;
   /**
    * Where the server can reach this host's own audio WSS DIRECTLY
    * (`host.host.audioRelayHost`) — an optional latency optimisation, not a
@@ -163,6 +165,8 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.scriptPayload !== undefined ? { scriptPayload: input.scriptPayload } : {}),
     ...(input.limitFacts !== undefined ? { limitFacts: input.limitFacts } : {}),
     ...(input.acpLogin !== undefined ? { acpLogin: input.acpLogin } : {}),
+    ...(input.managerFinished !== undefined ? { managerFinished: input.managerFinished } : {}),
+    ...(input.managerClear !== undefined ? { managerClear: input.managerClear } : {}),
     ...(input.audioRelayHost !== undefined ? { audioRelayHost: input.audioRelayHost } : {}),
     backends: input.backends,
     components: input.components,
