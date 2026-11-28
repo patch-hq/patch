@@ -21,6 +21,8 @@ export type CallCue = Exclude<CallSoundName, LoopingSound>;
 
 let ctx: AudioContext | null = null;
 const buffers = new Map<CallSoundName, AudioBuffer>();
+/** The app-start render, while it runs: a press in that moment plays as soon as it lands. */
+let warming: Promise<void> | null = null;
 
 function audio(what: string): AudioContext {
   if (ctx === null) {
@@ -40,20 +42,30 @@ function audio(what: string): AudioContext {
  * created here too; the browser keeps it suspended until the first press, which
  * resumes it (play).
  */
-export async function warmCallSounds(): Promise<void> {
-  const c = audio('warm');
-  await Promise.all(
-    CALL_SOUND_NAMES.map(async (name) => {
-      buffers.set(name, await renderCallSound(name, c.sampleRate));
-    }),
-  );
+export function warmCallSounds(): Promise<void> {
+  warming = (async () => {
+    const c = audio('warm');
+    await Promise.all(
+      CALL_SOUND_NAMES.map(async (name) => {
+        buffers.set(name, await renderCallSound(name, c.sampleRate));
+      }),
+    );
+  })();
+  return warming;
 }
 
-/** Start `name` now, in this task. Returns its source; throws if it was not warmed. */
-function play(name: CallSoundName): AudioBufferSourceNode {
+/**
+ * Start `name` now, in this task, and return its source. A press that lands
+ * while the app-start render is still running gets `null`: the caller starts it
+ * the moment the render lands. Throws if the sounds were never warmed at all.
+ */
+function play(name: CallSoundName): AudioBufferSourceNode | null {
   const c = audio(name);
   const buffer = buffers.get(name);
-  if (buffer === undefined) throw new Error(`call sound (${name}) was not warmed at app start`);
+  if (buffer === undefined) {
+    if (warming === null) throw new Error(`call sound (${name}) was not warmed at app start`);
+    return null;
+  }
   if (c.state === 'suspended') {
     c.resume().catch((e: unknown) => console.error(`call sound (${name}): ${String(e)}`));
   }
@@ -66,18 +78,31 @@ function play(name: CallSoundName): AudioBufferSourceNode {
 }
 
 export function playCallSound(cue: CallCue): void {
-  play(cue);
+  if (play(cue) === null) void warming!.then(() => play(cue));
 }
 
 const loops = new Map<LoopingSound, AudioBufferSourceNode>();
+/** Loops asked for while the app-start render was still running. */
+const pendingLoops = new Set<LoopingSound>();
 
 /** Start a looping sound; starting one already playing does nothing. */
 export function startCallSoundLoop(name: LoopingSound): void {
-  if (loops.has(name)) return;
-  loops.set(name, play(name));
+  if (loops.has(name) || pendingLoops.has(name)) return;
+  const source = play(name);
+  if (source !== null) {
+    loops.set(name, source);
+    return;
+  }
+  pendingLoops.add(name);
+  void warming!.then(() => {
+    if (!pendingLoops.delete(name)) return;
+    const late = play(name);
+    if (late !== null) loops.set(name, late);
+  });
 }
 
 export function stopCallSoundLoop(name: LoopingSound): void {
+  pendingLoops.delete(name);
   loops.get(name)?.stop();
   loops.delete(name);
 }
@@ -90,11 +115,13 @@ export function syncCallSoundLoop(name: LoopingSound, on: boolean): void {
 
 /** Every looping sound playing now. */
 export function playingCallSoundLoops(): LoopingSound[] {
-  return [...loops.keys()];
+  return [...loops.keys(), ...pendingLoops];
 }
 
 export function __resetCallSoundForTests(): void {
   for (const name of [...loops.keys()]) stopCallSoundLoop(name);
   buffers.clear();
+  pendingLoops.clear();
+  warming = null;
   ctx = null;
 }
