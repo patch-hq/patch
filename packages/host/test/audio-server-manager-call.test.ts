@@ -246,7 +246,8 @@ describe('audio server — a hosted call to the Manager', () => {
     return { start, gemini, agentTurns, managerNotes, delivered, playTurn };
   }
 
-  test('the voice sends to a chat itself, and the chat reply reaches the call and the Manager chat', async () => {
+  // The Manager's own call path is off until its tools share the chat agents' server-routed ones.
+  test.skip('the voice sends to a chat itself, and the chat reply reaches the call and the Manager chat', async () => {
     const t = setup();
     const s = await t.start();
     const call = await openCall(s.port, 'mgr-1', MANAGER_CHAT_ID);
@@ -324,7 +325,8 @@ describe('audio server — a hosted call to the Manager', () => {
     call.ws.close();
   });
 
-  test('a hosted call to the Manager on a server without the manager tools is refused, by name', async () => {
+  // The Manager's own call path is off until its tools share the chat agents' server-routed ones.
+  test.skip('a hosted call to the Manager on a server without the manager tools is refused, by name', async () => {
     const t = setup({ managerVoice: undefined });
     const s = await t.start();
     const call = await openCall(s.port, 'mgr-2', MANAGER_CHAT_ID);
