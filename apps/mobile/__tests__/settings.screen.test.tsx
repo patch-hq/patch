@@ -255,6 +255,33 @@ describe('Settings tab — the list', () => {
   });
 });
 
+describe('Settings tab — idle', () => {
+  it('commits a bounded number of renders while sitting on the list for a minute', async () => {
+    // A render loop here pins the JS thread (the 1.1.2194/2195 stalls on /settings):
+    // one load a poll may re-render the list, but nothing re-renders it on its own.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let commits = 0;
+      const r = renderRN(
+        <React.Profiler id="settings" onRender={() => (commits += 1)}>
+          <SettingsScreen />
+        </React.Profiler>,
+      );
+      await flush();
+      const afterOpen = commits;
+      await actAsync(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      // four polls, each at most one commit for the new data
+      expect(commits - afterOpen).toBeLessThanOrEqual(8);
+      expect(afterOpen).toBeLessThanOrEqual(10);
+      r.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('/settings/[page]', () => {
   it('gives the deployment a ready-to-submit Web Bot Auth setup', async () => {
     const committed = settingsFixture().preferences;

@@ -141,7 +141,7 @@ export async function retryOnNetworkFailure<T>(
 
 /** A crash the phone caught — mirrors the server's client-crash-routes schema. */
 export interface CrashReport {
-  source: 'boundary' | 'global' | 'native';
+  source: 'boundary' | 'global' | 'native' | 'stall';
   message: string;
   stack?: string;
   componentStack?: string;

@@ -193,23 +193,33 @@ export function startCrashCapture(): void {
     }
     const launch = beginSession(Date.now(), crash !== null);
     trackSession();
-    startStallWatchdog();
+    startStallWatchdog(reportStall);
     if (crash) await reportNativeCrash(crash);
     if (launch.unexplained && launch.entry) await recordExit(launch.entry.detail, launch.entry.at);
   })();
 }
 
-/** An exit we only found on relaunch: shared like a crash when sharing is on. */
-async function recordExit(detail: string, at: number): Promise<void> {
+/** Queue and send a report that is not a caught crash, when sharing is on. */
+async function share(source: CrashReport['source'], message: string, fatal: boolean, at: number) {
   if (!telemetryEnabled()) return;
   const info = mobileBuildInfo();
   const report: CrashReport = {
-    source: 'native',
-    message: `unexpected exit: ${detail}`,
-    fatal: true,
+    source,
+    message,
+    fatal,
     occurredAt: at,
     build: `${info.version}${info.gitSha ? `+${info.gitSha}` : ''}`,
   };
   writePending([...readPending(), report]);
   await send(report);
+}
+
+/** An exit we only found on relaunch: shared like a crash when sharing is on. */
+function recordExit(detail: string, at: number): Promise<void> {
+  return share('native', `unexpected exit: ${detail}`, true, at);
+}
+
+/** A long JS stall that recovered: the host log names the screen it was on. */
+export function reportStall(detail: string, at: number): void {
+  void share('stall', detail, false, at);
 }
