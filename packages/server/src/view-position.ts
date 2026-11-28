@@ -14,6 +14,8 @@ export interface ViewPosition {
   id?: string;
   seq?: number;
   surfaceId: string;
+  /** What kind of surface reported it, so another can say "Continue from desktop". */
+  surfaceKind?: string;
   updatedAt: number;
 }
 
@@ -45,6 +47,7 @@ export class ViewPositionStore {
         ...(typeof r.id === 'string' ? { id: r.id } : {}),
         ...(typeof r.seq === 'number' ? { seq: r.seq } : {}),
         surfaceId: r.surfaceId,
+        ...(typeof r.surfaceKind === 'string' ? { surfaceKind: r.surfaceKind } : {}),
         updatedAt: r.updatedAt,
       };
     } catch (err) {
@@ -60,12 +63,24 @@ export class ViewPositionStore {
     return this.current;
   }
 
-  set(surfaceId: string, pos: { page: ViewPage; id?: string; seq?: number }): void {
+  /**
+   * Record where the user is. A report of the place already held is ignored —
+   * no new stamp, no broadcast — so a surface repeating itself can never look
+   * like a move. Returns whether it changed.
+   */
+  set(
+    surfaceId: string,
+    pos: { page: ViewPage; id?: string; seq?: number },
+    surfaceKind?: string,
+  ): boolean {
+    const cur = this.current;
+    if (cur && cur.page === pos.page && cur.id === pos.id && cur.seq === pos.seq) return false;
     const next: ViewPosition = {
       page: pos.page,
       ...(pos.id !== undefined ? { id: pos.id } : {}),
       ...(pos.seq !== undefined ? { seq: pos.seq } : {}),
       surfaceId,
+      ...(surfaceKind !== undefined ? { surfaceKind } : {}),
       updatedAt: this.nowMs(),
     };
     this.current = next;
@@ -82,6 +97,7 @@ export class ViewPositionStore {
         this.logger?.warn({ err: (err as Error).message }, 'view-position: handler threw');
       }
     }
+    return true;
   }
 
   onChange(handler: (p: ViewPosition) => void): () => void {

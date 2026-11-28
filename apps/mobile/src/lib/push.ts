@@ -19,6 +19,7 @@ import { useUiStore } from '../stores/uiStore';
 import { ensurePermission } from './permissionGate';
 import { notificationsOff, persistNotificationsOff } from './notificationsMaster';
 import { showIncomingCall } from './callkeep';
+import { receiveHandoverPush } from './handover';
 import {
   initNotificationCategories,
   presentWithDynamicCategory,
@@ -131,6 +132,10 @@ async function register(): Promise<void> {
       shouldPlaySound: boolean;
       shouldSetBadge: boolean;
     }> => {
+      // A handover push is silent: nothing is ever shown for it (spec/05).
+      if (n.request.content.data?.['kind'] === 'view_position') {
+        return { shouldShowAlert: false, shouldPlaySound: false, shouldSetBadge: false };
+      }
       const aboutOpenChat =
         AppState.currentState === 'active' &&
         n.request.content.data?.['chatId'] === useChatStore.getState().activeChatId;
@@ -193,6 +198,11 @@ async function register(): Promise<void> {
   _subs.push(
     Notifications.addNotificationReceivedListener((n) => {
       const data = n.request.content.data ?? {};
+      // spec/05 § Handover — the silent position push, received with the app open.
+      if (data['kind'] === 'view_position') {
+        receiveHandoverPush(data);
+        return;
+      }
       // spec/09 § Notification actions — a question's own option text or
       // patch_notify's quickReplies can't be pre-registered (the labels aren't
       // known ahead of time). The OS has already drawn this push against the

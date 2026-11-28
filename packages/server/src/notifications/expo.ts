@@ -82,7 +82,12 @@ export class ExpoPushBackend implements PushBackend {
         // `channelId` also rides in data so the phone can re-present the push on
         // the same channel when it has to redraw it (dynamic action buttons).
         ...(payload.data
-          ? { data: { ...payload.data, ...(channelFields.channelId ? { channelId: channelFields.channelId } : {}) } }
+          ? {
+              data: {
+                ...payload.data,
+                ...(channelFields.channelId ? { channelId: channelFields.channelId } : {}),
+              },
+            }
           : {}),
         // Expo reads the action-button category from the message's own field;
         // inside `data` it only reaches the app's JS, never the OS's builder.
@@ -122,4 +127,31 @@ export class ExpoPushBackend implements PushBackend {
     }
     return { delivered, failed, permanentlyRejected, reasons };
   }
+}
+
+/**
+ * A data-only push: nothing is shown, the app's background notification task
+ * receives `data` (spec/05 § Handover). High priority, as a 'default' message
+ * waits for the next Doze window — the phone would be opened before it lands.
+ */
+export async function sendExpoData(
+  tokens: string[],
+  data: Record<string, string>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ failed: string[] }> {
+  const failed: string[] = [];
+  for (let i = 0; i < tokens.length; i += MAX_MESSAGES_PER_REQUEST) {
+    const chunk = tokens.slice(i, i + MAX_MESSAGES_PER_REQUEST);
+    const res = await fetchImpl(EXPO_PUSH_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify(chunk.map((to) => ({ to, data, priority: 'high' }))),
+    });
+    if (!res.ok) throw new Error(`Expo push API returned ${res.status}: ${await res.text()}`);
+    const body = (await res.json()) as { data?: ExpoPushTicket[] };
+    (body.data ?? []).forEach((t, idx) => {
+      if (t.status !== 'ok' && chunk[idx]) failed.push(chunk[idx]);
+    });
+  }
+  return { failed };
 }

@@ -46,6 +46,7 @@ import {
   noteExplicitNavigation,
   noteUserInput,
 } from '../src/components/ViewPositionSync';
+import { HandoverChip } from '../src/components/HandoverChip';
 import { ErrorToasts } from '../src/components/ErrorToasts';
 import { PermissionExplainerModal } from '../src/components/PermissionExplainerModal';
 import { fonts, useTheme } from '../src/lib/theme';
@@ -367,6 +368,7 @@ export default function RootLayout(): React.ReactElement | null {
             <Stack.Screen name="new-chat" options={{ animation: 'none' }} />
           </Stack>
           <ViewPositionSync />
+          <HandoverChip />
           <IncomingCallSheet />
           <SignInApprovalSheet />
           <VoiceNoteOverlay />

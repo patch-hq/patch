@@ -135,13 +135,9 @@ export class PatchWs {
   /**
    * spec/05 § Handover — the server sends the current view position right
    * after `auth.ok`. That one is a snapshot of something that may have happened
-   * while the socket was down, so it counts as arriving when the link was lost
-   * (`lostAt`; 0 on the first connection of the process), not now.
+   * while the socket was down, not a live move, and is decided differently.
    */
   private positionSnapshotDue = false;
-  private lostAt = 0;
-  /** The current socket got as far as `auth.ok`; a failed dial loses nothing. */
-  private socketAuthed = false;
   /**
    * The chats the server was last told this phone follows, on this socket
    * (`feed.resume` / `feed.follow`, spec/03 § Account feed). `null` until the
@@ -607,8 +603,6 @@ export class PatchWs {
       if (current) this.clearConnectTimer();
       if (current) {
         this.ws = null;
-        if (this.socketAuthed) this.lostAt = Date.now();
-        this.socketAuthed = false;
         this.stopHeartbeat();
         useChatStore.getState().clearReplaying();
       }
@@ -797,7 +791,6 @@ export class PatchWs {
     }
     if (event.type === 'auth.ok') {
       this.positionSnapshotDue = true;
-      this.socketAuthed = true;
       this.backoff = INITIAL_BACKOFF_MS;
       this.restartingUntil = 0;
       usePresenceStore.getState().setIdentity(event.accountId, event.surfaceId);
@@ -950,11 +943,9 @@ export class PatchWs {
     // spec/05 § Handover — where the user last was, on whichever surface.
     if (event.type === 'view_position.updated') {
       const { type: _type, ...pos } = event;
-      const arrivedAt = this.positionSnapshotDue ? this.lostAt : Date.now();
+      const snapshot = this.positionSnapshotDue;
       this.positionSnapshotDue = false;
-      useViewPositionStore
-        .getState()
-        .applyUpdated(pos, usePresenceStore.getState().surfaceId, arrivedAt);
+      useViewPositionStore.getState().applyUpdated(pos, snapshot);
       return;
     }
     // spec/14 § Composer — server-owned drafts. The cold-start snapshot, sent

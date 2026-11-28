@@ -5052,9 +5052,9 @@ export type ViewPositionSetEvent = z.infer<typeof ViewPositionSetEvent>;
 
 /**
  * Server → every surface: the account's current position, and which surface
- * reported it. Sent on connect and after every `view_position.set`. A surface
- * ignores its own reports and applies another's only on launch or when it
- * returns to the foreground, so a handover never moves a screen under a hand.
+ * reported it. Sent on connect and after every `view_position.set` that moved
+ * it. A surface applies another's only while the user is not using it, so a
+ * handover never moves a screen under a hand.
  */
 export const ViewPositionUpdatedEvent = z
   .object({
@@ -5063,6 +5063,8 @@ export const ViewPositionUpdatedEvent = z
     id: z.string().min(1).optional(),
     seq: z.number().int().nonnegative().optional(),
     surfaceId: z.string().min(1),
+    /** The kind of surface that reported it (`desktop`, `web`, `mobile`), for "Continue from …". */
+    surfaceKind: z.string().min(1).optional(),
     updatedAt: z.number(),
   })
   .strict();

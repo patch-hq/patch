@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 // spec/05 § Handover × spec/14 § Groups — what the phone last looked at is
-// what the desktop opens on, through the group/tab layout the desktop already
+// what the desktop is on when the user comes back to it, through the group/tab layout the desktop already
 // has, and the Settings switch turns it off.
 
 test.use({ viewport: { width: 1800, height: 900 } });
@@ -18,11 +18,14 @@ async function phoneReports(page: Page, pos: Omit<Pos, 'surfaceId' | 'updatedAt'
         getState: () => { applyUpdated: (p: Pos, own: string | null) => void };
       };
     };
+    // The user is on the phone, so this window is not focused: a position is
+    // taken up as it arrives, and coming back finds the window already there.
+    const realHasFocus = document.hasFocus.bind(document);
+    document.hasFocus = () => false;
     w.__viewPositionStore
       .getState()
       .applyUpdated({ ...p, surfaceId: 'phone', updatedAt: Date.now() }, 'desk');
-    // The desktop window coming back to the front is when a position is taken
-    // up — never while the user is mid-use.
+    document.hasFocus = realHasFocus;
     window.dispatchEvent(new Event('focus'));
   }, pos);
 }
