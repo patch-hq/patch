@@ -1,7 +1,11 @@
 // Smart Turn in a Web Worker (spec/07 § Direct calls → end of turn on the
 // device): the same Whisper features the host computes (`@patch/wire/smart-turn`)
 // and the same model, run by onnxruntime-web, off the page's main thread. One
-// thread, so the page needs no cross-origin isolation.
+// thread, so the page needs no cross-origin isolation: a check takes about
+// 20 ms of features and 150 ms of model on a recent laptop, well inside the
+// pause that asks it. Threads (45 ms at four) would need the whole app served
+// cross-origin isolated, which breaks cross-origin popups and embeds; the
+// quantised model does not run on WebGPU (DequantizeLinear rank mismatch).
 
 import * as ort from 'onnxruntime-web/wasm';
 import { N_FRAMES, N_MELS, lastEightSeconds, whisperFeatures } from '@patch/wire/smart-turn';

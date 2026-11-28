@@ -43,21 +43,21 @@ object SmartTurnFeatures {
   private fun melToHz(m: Double): Double =
     if (m < 15) (200 * m) / 3 else 1000 * exp((ln(6.4) * (m - 15)) / 27)
 
+  /**
+   * Radices of the mixed-radix FFT (Stockham autosort): 5·5·2·2·2·2 = 400. The
+   * same numbers as the plain DFT in about a tenth of the work, as in
+   * `@patch/wire/smart-turn` (`powerSpectrum`).
+   */
+  private val RADICES = intArrayOf(5, 5, 2, 2, 2, 2)
+
   private val tables by lazy {
-    val cosT = DoubleArray(N_BINS * N_FFT)
-    val sinT = DoubleArray(N_BINS * N_FFT)
-    for (k in 0 until N_BINS) {
-      for (n in 0 until N_FFT) {
-        val a = (2 * PI * k * n) / N_FFT
-        cosT[k * N_FFT + n] = cos(a)
-        sinT[k * N_FFT + n] = sin(a)
-      }
-    }
+    val wRe = DoubleArray(N_FFT) { e -> cos((2 * PI * e) / N_FFT) }
+    val wIm = DoubleArray(N_FFT) { e -> -sin((2 * PI * e) / N_FFT) }
     val window = DoubleArray(N_FFT) { n -> 0.5 - 0.5 * cos((2 * PI * n) / N_FFT) }
     val maxHz = SAMPLE_RATE / 2.0
     val melMax = hzToMel(maxHz)
     val edges = DoubleArray(N_MELS + 2) { i -> melToHz((melMax * i) / (N_MELS + 1)) }
-    val mel =
+    val rows =
       Array(N_MELS) { m ->
         val lo = edges[m]
         val mid = edges[m + 1]
@@ -70,15 +70,74 @@ object SmartTurnFeatures {
           max(0.0, min(down, up)) * enorm
         }
       }
-    Tables(cosT, sinT, window, mel)
+    // Each filter over its non-zero bins only.
+    val melFrom = IntArray(N_MELS)
+    val mel =
+      Array(N_MELS) { m ->
+        val row = rows[m]
+        var from = 0
+        while (from < N_BINS && row[from] == 0.0) from++
+        var to = N_BINS
+        while (to > from && row[to - 1] == 0.0) to--
+        melFrom[m] = from
+        row.copyOfRange(from, to)
+      }
+    Tables(wRe, wIm, window, mel, melFrom)
   }
 
   private class Tables(
-    val cos: DoubleArray,
-    val sin: DoubleArray,
+    val wRe: DoubleArray,
+    val wIm: DoubleArray,
     val window: DoubleArray,
     val mel: Array<DoubleArray>,
+    val melFrom: IntArray,
   )
+
+  /** `power[k] = |X[k]|²` for k in [0, N_BINS) of the real 400-sample `frame`. */
+  fun powerSpectrum(frame: DoubleArray, power: DoubleArray) {
+    val t = tables
+    var xRe = frame.copyOf()
+    var xIm = DoubleArray(N_FFT)
+    var yRe = DoubleArray(N_FFT)
+    var yIm = DoubleArray(N_FFT)
+    val vRe = DoubleArray(5)
+    val vIm = DoubleArray(5)
+    var ns = 1
+    for (r in RADICES) {
+      val stride = N_FFT / r
+      val step = N_FFT / (ns * r)
+      for (j in 0 until stride) {
+        val k = j % ns
+        for (a in 0 until r) {
+          val re = xRe[j + a * stride]
+          val im = xIm[j + a * stride]
+          val e = (k * a * step) % N_FFT
+          vRe[a] = re * t.wRe[e] - im * t.wIm[e]
+          vIm[a] = re * t.wIm[e] + im * t.wRe[e]
+        }
+        val out = (j / ns) * ns * r + k
+        for (q in 0 until r) {
+          var sRe = 0.0
+          var sIm = 0.0
+          for (a in 0 until r) {
+            val e = ((a * q) % r) * stride
+            sRe += vRe[a] * t.wRe[e] - vIm[a] * t.wIm[e]
+            sIm += vRe[a] * t.wIm[e] + vIm[a] * t.wRe[e]
+          }
+          yRe[out + q * ns] = sRe
+          yIm[out + q * ns] = sIm
+        }
+      }
+      val sr = xRe
+      xRe = yRe
+      yRe = sr
+      val si = xIm
+      xIm = yIm
+      yIm = si
+      ns *= r
+    }
+    for (k in 0 until N_BINS) power[k] = xRe[k] * xRe[k] + xIm[k] * xIm[k]
+  }
 
   fun whisperFeatures(audio: DoubleArray): FloatArray {
     require(audio.size == N_SAMPLES) { "expected $N_SAMPLES samples, got ${audio.size}" }
@@ -106,20 +165,12 @@ object SmartTurnFeatures {
     for (fr in 0 until N_FRAMES) {
       val start = fr * HOP
       for (n in 0 until N_FFT) frame[n] = padded[start + n] * t.window[n]
-      for (k in 0 until N_BINS) {
-        var re = 0.0
-        var im = 0.0
-        val row = k * N_FFT
-        for (n in 0 until N_FFT) {
-          re += frame[n] * t.cos[row + n]
-          im -= frame[n] * t.sin[row + n]
-        }
-        power[k] = re * re + im * im
-      }
+      powerSpectrum(frame, power)
       for (m in 0 until N_MELS) {
         val filter = t.mel[m]
+        val from = t.melFrom[m]
         var e = 0.0
-        for (k in 0 until N_BINS) e += filter[k] * power[k]
+        for (k in filter.indices) e += filter[k] * power[from + k]
         val v = log10(max(e, 1e-10))
         out[m * N_FRAMES + fr] = v
         if (v > top) top = v
