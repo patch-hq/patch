@@ -133,7 +133,6 @@ export function ManagerPage(): JSX.Element {
         <PromptRow
           id="manager"
           title="Prompt"
-          sub="Given to the Manager at the start of every session."
           defaultText={DEFAULT_MANAGER_PROMPT}
           current={preferences.managerPrompt}
           onSave={(text) => patchShared('Manager prompt', { managerPrompt: text })}
@@ -155,7 +154,7 @@ export function ManagerPage(): JSX.Element {
       </Group>
 
       <Group label="Finished chats" testid="settings-manager-wake">
-        <Row title="Send to the Manager" sub="Chats with a goal running are left out">
+        <Row title="Send to the Manager">
           <Pills
             label="Send finished chats"
             options={['off', 'each', 'batched'] as const}

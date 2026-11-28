@@ -33,7 +33,7 @@ import {
 import { SignInRequestStore, TooManySignInRequestsError } from './signin-requests.js';
 import { LOCAL_ADMIN_HEADER, localAdminTokenMatches, localSurfaceId } from './local-admin.js';
 import { DEFAULT_SETTINGS } from './settings.js';
-import { SettingsError, type SharedSettingsService } from './shared-settings.js';
+import { isManagerFolder, SettingsError, type SharedSettingsService } from './shared-settings.js';
 import { ManagerHomeError } from './manager-home-error.js';
 
 /** Validate that `s` decodes from base64url to exactly 32 bytes (Ed25519 pub key). */
@@ -248,6 +248,11 @@ class HostRegisterStore {
 
 export interface AuthRoutesDeps {
   logger: Logger;
+  /**
+   * Whether a Manager folder is a folder on the Manager's home host; null
+   * when it is (spec/06 § Manager prompt and folder).
+   */
+  checkManagerFolder?: (path: string) => Promise<{ status: number; message: string } | null>;
   registry: Registry;
   presence: PresenceTracker;
   /** Each device's last speech-engine report, shown in Settings (spec/05 § Speech engines). */
@@ -928,6 +933,25 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     const parsed = SharedSettingsPatch.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    const folder = parsed.data.managerFolder;
+    if (
+      folder !== undefined &&
+      folder !== '' &&
+      isManagerFolder(folder) &&
+      folder !== deps.accountSettings.current().managerFolder
+    ) {
+      if (!deps.checkManagerFolder) {
+        return reply
+          .code(503)
+          .send({ error: 'manager_folder', message: 'Cannot check the folder' });
+      }
+      const problem = await deps.checkManagerFolder(folder);
+      if (problem) {
+        return reply
+          .code(problem.status)
+          .send({ error: 'manager_folder', message: problem.message });
+      }
     }
     // Committed here and pushed to every host as a snapshot (spec/01 § Settings).
     try {

@@ -120,6 +120,8 @@ const ManagerHandoverRecord = z
     fromHostName: z.string().min(1),
     toHostName: z.string().min(1),
     message: z.string(),
+    /** The Manager folder the move put back to the default; it was on the old home. */
+    folderReset: z.string().min(1).optional(),
   })
   .strict();
 export type ManagerHandoverRecord = z.infer<typeof ManagerHandoverRecord>;

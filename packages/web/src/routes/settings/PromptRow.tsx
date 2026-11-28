@@ -21,7 +21,7 @@ export function PromptRow({
 }: {
   id: string;
   title: string;
-  sub: string;
+  sub?: string;
   /** What Patch sends when nothing is customised. */
   defaultText: string;
   /** The text in force; equal to `defaultText` while on the default. */
@@ -63,7 +63,7 @@ export function PromptRow({
       <div className="set-row-head">
         <div className="set-row-text">
           <span className="set-row-title">{title}</span>
-          <span className="set-sub">{sub}</span>
+          {sub !== undefined ? <span className="set-sub">{sub}</span> : null}
         </div>
         {custom && !editing ? (
           <button

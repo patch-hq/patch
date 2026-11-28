@@ -9,6 +9,7 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { api } from '../../api/rest';
 import { usePresenceStore } from '../../stores/presenceStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { OptionPicker } from '../OptionPicker';
 import { SettingsSection } from '../SettingsSection';
 import { hostName, sortedHosts } from './HostSwitcher';
@@ -19,7 +20,10 @@ interface Pending {
   message: string;
 }
 
-export function ManagerHomeSection(): React.ReactElement {
+/** Where the Manager works when no folder is set (spec/06 § Where special threads run). */
+export const DEFAULT_MANAGER_FOLDER_LABEL = '~/.patch/threads/manager';
+
+export function ManagerHomeSection({ folder }: { folder: string }): React.ReactElement {
   const hosts = usePresenceStore((s) => s.hosts);
   const [current, setCurrent] = React.useState<string | null | undefined>(undefined);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -128,6 +132,82 @@ export function ManagerHomeSection(): React.ReactElement {
           </ButtonRow>
         </Row>
       ) : null}
+      <ManagerFolderRow folder={folder} />
     </SettingsSection>
+  );
+}
+
+/**
+ * Home → Folder (spec/06 § Manager prompt and folder): the path, with Change
+ * opening a path field. The server checks it on the home host before saving
+ * it, and its refusal is shown under the field.
+ */
+function ManagerFolderRow({ folder }: { folder: string }): React.ReactElement {
+  const [draft, setDraft] = React.useState<string | null>(null);
+  const [problem, setProblem] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const save = async (): Promise<void> => {
+    if (draft === null) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      await useSettingsStore.getState().updatePreferences({ managerFolder: draft.trim() });
+      setDraft(null);
+    } catch (e) {
+      setProblem((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (draft === null) {
+    return (
+      <Row
+        testID="manager-folder"
+        title="Folder"
+        subtitle={folder === '' ? DEFAULT_MANAGER_FOLDER_LABEL : folder}
+        subtitleTestID="manager-folder-path"
+        right={
+          <SettingsButton
+            testID="manager-folder-change"
+            label="Change"
+            onPress={() => {
+              setProblem(null);
+              setDraft(folder);
+            }}
+          />
+        }
+      />
+    );
+  }
+  return (
+    <Row testID="manager-folder" title="Folder" stack>
+      <Field
+        testID="manager-folder-input"
+        accessibilityLabel="Manager folder"
+        value={draft}
+        placeholder={DEFAULT_MANAGER_FOLDER_LABEL}
+        editable={!busy}
+        onChangeText={setDraft}
+        onSubmitEditing={() => void save()}
+      />
+      {problem !== null ? <ErrorLine testID="manager-folder-error" message={problem} /> : null}
+      <ButtonRow>
+        <SettingsButton
+          testID="manager-folder-cancel"
+          label="Cancel"
+          variant="quiet"
+          disabled={busy}
+          onPress={() => setDraft(null)}
+        />
+        <SettingsButton
+          testID="manager-folder-save"
+          label="Save"
+          disabled={busy}
+          onPress={() => void save()}
+        />
+      </ButtonRow>
+    </Row>
   );
 }

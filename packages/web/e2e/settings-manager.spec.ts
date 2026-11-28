@@ -43,9 +43,10 @@ test.describe('Settings → Manager', () => {
       'settings-manager',
     ]);
     await expect(page.getByTestId('manager-folder')).toBeVisible();
-    await expect(page.getByTestId('prompt-manager')).toContainText(
-      'Given to the Manager at the start of every session.',
-    );
+    await expect(page.getByTestId('prompt-manager')).toBeVisible();
+    // Titles only: no explainer lines under the new rows.
+    await expect(page.getByTestId('prompt-manager').locator('.set-sub')).toHaveCount(0);
+    await expect(page.getByTestId('manager-folder').locator('.set-sub')).toHaveCount(0);
     await expect(page.getByTestId('prompt-manager-voice')).toBeVisible();
     await expect(page.getByTestId('settings-sweep')).toHaveCount(0);
     await expect(page.getByTestId('manager-instructions')).toHaveCount(0);
@@ -106,18 +107,36 @@ test.describe('Settings → Manager', () => {
     expect((await patch).postDataJSON()).toEqual({ managerPrompt: 'Answer in one line.' });
   });
 
-  test('the folder is checked on the home host before it is saved', async ({ page }) => {
-    await page.route('**/api/hosts/mac/files**', (r) =>
-      r.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({ path: '/srv/work', parent: '/srv', entries: [] }),
-      }),
-    );
+  test('the folder is saved through the server, which checks it on the home host', async ({
+    page,
+  }) => {
     await page.getByTestId('manager-folder-change').click();
     await page.getByTestId('manager-folder-input').fill('/srv/work');
     const patch = patchOf(page);
     await page.getByTestId('manager-folder-save').click();
     expect((await patch).postDataJSON()).toEqual({ managerFolder: '/srv/work' });
     await expect(page.getByTestId('manager-folder-path')).toHaveText('/srv/work');
+  });
+
+  test('a folder the server refuses keeps the field open and says why', async ({ page }) => {
+    await page.route('**/api/settings', (r) =>
+      r.request().method() === 'PATCH'
+        ? r.fulfill({
+            status: 400,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              error: 'manager_folder',
+              message: '/srv/nope is not a folder on Studio Mac',
+            }),
+          })
+        : r.fallback(),
+    );
+    await page.getByTestId('manager-folder-change').click();
+    await page.getByTestId('manager-folder-input').fill('/srv/nope');
+    await page.getByTestId('manager-folder-save').click();
+    await expect(page.getByTestId('manager-folder-error')).toHaveText(
+      '/srv/nope is not a folder on Studio Mac',
+    );
+    await expect(page.getByTestId('manager-folder-input')).toBeVisible();
   });
 });

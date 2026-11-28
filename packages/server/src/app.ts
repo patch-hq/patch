@@ -77,6 +77,7 @@ import { BatchNotifier } from './notifications/batch.js';
 import { FolderRegistry } from './folder-registry.js';
 import { registerFolderRoutes, requireAuth } from './folder-routes.js';
 import { registerHostFilesRoutes } from './host-files-routes.js';
+import { managerFolderProblem } from './manager-folder-check.js';
 import { registerMcpAppRoutes } from './mcp-app-routes.js';
 import { registerChatContinueRoutes } from './chat-continue-routes.js';
 import { registerVoiceprintRoutes } from './voiceprint-routes.js';
@@ -715,6 +716,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
     registeredHostIds: () => registry.registeredHostIds(),
     onChanged: () => wsHub.republishAllHosts(),
+    currentFolder: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).managerFolder,
+    resetFolder: () => {
+      if (!accountSettings) throw new Error('account settings are not configured');
+      accountSettings.update({ managerFolder: '' });
+    },
   });
   const specialThreadHost = (): string | null => registry.managerHostId();
 
@@ -2259,7 +2265,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // ---- host files REST (spec/03 § Host files) ----
-  registerHostFilesRoutes(app, {
+  const hostFiles = registerHostFilesRoutes(app, {
     logger: log.child({ component: 'host-files-routes' }),
     registry,
     hostLink,
@@ -2528,6 +2534,16 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerAuthRoutes(app, {
     logger: log.child({ component: 'auth-routes' }),
     registry,
+    checkManagerFolder: (path) =>
+      managerFolderProblem(
+        {
+          managerHostId: specialThreadHost,
+          hostName: (id) => registry.hostName(id),
+          isOnline: (id) => hostLink.isOnline(id),
+          hostFiles,
+        },
+        path,
+      ),
     ...(opts.dataDir ? { localAdminToken: ensureLocalAdminToken(serverDir) } : {}),
     presence,
     speechEngines,

@@ -28,6 +28,10 @@ export interface ManagerHomeDeps {
   registeredHostIds: () => string[];
   /** Tell every surface the roster changed. */
   onChanged: () => void;
+  /** The Manager folder (`''` is the default). */
+  currentFolder?: () => string;
+  /** Put the Manager folder back to the default: a folder is a path on one host. */
+  resetFolder?: () => void;
 }
 
 export class ManagerHome {
@@ -61,14 +65,24 @@ export class ManagerHome {
     for (const chatId of Object.values(SPECIAL_THREAD_IDS)) {
       nextSeqs[chatId] = this.deps.log.highWater(chatId) + 1;
     }
+    const folder = this.deps.currentFolder?.() ?? '';
     this.deps.registry.changeManagerHome(toHostId, {
       nextSeqs,
       fromHostName: this.deps.registry.hostName(from) ?? from,
       toHostName: this.deps.registry.hostName(toHostId) ?? toHostId,
       message,
+      ...(folder !== '' ? { folderReset: folder } : {}),
     });
+    const setManager: WireEvent = { type: 'host.set_manager', hostId: toHostId };
+    // The old home stops running the Manager before the folder goes back to
+    // the default, so it never moves its copy on the way out; the new home
+    // starts running it after, so it is never given the old home's path.
     for (const id of this.deps.registeredHostIds()) {
-      this.deps.sendTo(id, SERVER_SURFACE, { type: 'host.set_manager', hostId: toHostId });
+      if (id !== toHostId) this.deps.sendTo(id, SERVER_SURFACE, setManager);
+    }
+    if (folder !== '') this.deps.resetFolder?.();
+    if (this.deps.registeredHostIds().includes(toHostId)) {
+      this.deps.sendTo(toHostId, SERVER_SURFACE, setManager);
     }
     this.deps.sendTo(toHostId, SERVER_SURFACE, this.event());
     this.deps.onChanged();
@@ -92,6 +106,7 @@ export class ManagerHome {
       fromHostName: h.fromHostName,
       toHostName: h.toHostName,
       message: h.message,
+      ...(h.folderReset !== undefined ? { folderReset: h.folderReset } : {}),
     };
   }
 

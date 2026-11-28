@@ -124,6 +124,40 @@ describe('ManagerHome', () => {
     expect(changed).toBe(1);
   });
 
+  it('a Manager folder is a path on the old home: the move puts it back to the default, in order', () => {
+    twoHosts();
+    let folder = '/Users/me/work';
+    const order: string[] = [];
+    home = new ManagerHome({
+      registry,
+      log: { read: () => [], highWater: () => -1 } as never,
+      contextWindow: () => 2,
+      sendTo: (hostId, _surface, event) => order.push(`${event.type}→${hostId}`),
+      registeredHostIds: () => registry.registeredHostIds(),
+      onChanged: () => {},
+      currentFolder: () => folder,
+      resetFolder: () => {
+        order.push('folder reset');
+        folder = '';
+      },
+    });
+    home.change('h2', '');
+    expect(folder).toBe('');
+    // The old home stops running the Manager first; the new one starts after.
+    expect(order).toEqual([
+      'host.set_manager→h1',
+      'folder reset',
+      'host.set_manager→h2',
+      'host.manager_handover→h2',
+    ]);
+    expect(home.pendingFor('h2')).toMatchObject({ folderReset: '/Users/me/work' });
+    // The default folder is nothing to reset.
+    order.length = 0;
+    home.change('h1', '');
+    expect(order).not.toContain('folder reset');
+    expect(home.pendingFor('h1')).not.toHaveProperty('folderReset');
+  });
+
   it('a new home that was offline is told again when it attaches, and the old home is not', () => {
     twoHosts();
     home.change('h2', '');

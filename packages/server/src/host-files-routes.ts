@@ -57,7 +57,15 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   internal: 502,
 };
 
-export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRoutesDeps): void {
+/** One host files round trip, for server code that needs a host's answer itself. */
+export interface HostFilesClient {
+  request(hostId: string, surfaceId: string, body: RequestBody): Promise<Response | 'timeout'>;
+}
+
+export function registerHostFilesRoutes(
+  app: FastifyInstance,
+  deps: HostFilesRoutesDeps,
+): HostFilesClient {
   const pending = new Map<
     string,
     { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; hostId: string }
@@ -79,6 +87,27 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
     clearTimeout(w.timeout);
     w.resolve(event);
   });
+
+  function request(
+    hostId: string,
+    surfaceId: string,
+    body: RequestBody,
+  ): Promise<Response | 'timeout'> {
+    const requestId = deps.idGenerator();
+    return new Promise<Response | 'timeout'>((resolve) => {
+      const timeout = setTimeout(() => {
+        pending.delete(requestId);
+        resolve('timeout');
+      }, HOST_FILES_TIMEOUT_MS);
+      pending.set(requestId, { resolve, timeout, hostId });
+      deps.hostLink.sendTo(hostId, surfaceId, {
+        type: 'patch.host_files.request',
+        requestId,
+        hostId,
+        ...body,
+      });
+    });
+  }
 
   /**
    * The shared front half of every route: authenticate, check the host, build
@@ -119,20 +148,7 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
       await reply.code(400).send({ error: 'path_invalid', message: body });
       return null;
     }
-    const requestId = deps.idGenerator();
-    const result = await new Promise<Response | 'timeout'>((resolve) => {
-      const timeout = setTimeout(() => {
-        pending.delete(requestId);
-        resolve('timeout');
-      }, HOST_FILES_TIMEOUT_MS);
-      pending.set(requestId, { resolve, timeout, hostId });
-      deps.hostLink.sendTo(hostId, auth.surfaceId, {
-        type: 'patch.host_files.request',
-        requestId,
-        hostId,
-        ...body,
-      });
-    });
+    const result = await request(hostId, auth.surfaceId, body);
     if (result === 'timeout') {
       await reply.code(504).send({ error: 'daemon_timeout' });
       return null;
@@ -209,4 +225,6 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
       return reply.code(200).send({ path: res.path, size: res.size, version: res.version });
     },
   );
+
+  return { request };
 }

@@ -82,8 +82,14 @@ export function errorMessageFrom(parsed: unknown, status: number): string {
   const detail = obj && typeof obj.message === 'string' ? obj.message : null;
   // A voice surface with no provider key on its host: the host's message is
   // the complete sentence (key, host, Settings → Voice), shown as is. So is
-  // the refusal to remove the Manager's home host (spec/06 § Changing home).
-  if ((code === 'voice_key_missing' || code === 'manager_home') && detail) return detail;
+  // the refusal to remove the Manager's home host (spec/06 § Changing home),
+  // and a Manager folder that is not a folder on its home host.
+  if (
+    (code === 'voice_key_missing' || code === 'manager_home' || code === 'manager_folder') &&
+    detail
+  ) {
+    return detail;
+  }
   return detail ? `${code}: ${detail}` : code;
 }
 

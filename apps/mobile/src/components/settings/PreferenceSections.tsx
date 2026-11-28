@@ -106,7 +106,7 @@ export function ManagerPage(): React.ReactElement {
       <WithSettings testID="manager">
         {(data) => (
           <>
-            <ManagerHomeSection />
+            <ManagerHomeSection folder={data.preferences.managerFolder} />
             <SettingsSection title="Prompts" testID="settings-manager-prompts">
               <TextPromptLink layer="manager" preferences={data.preferences} />
               <TextPromptLink layer="manager-voice" preferences={data.preferences} />
@@ -227,7 +227,6 @@ function FinishedChatsControls({
   return (
     <>
       <Row testID="manager-wake" title="Send to the Manager" stack>
-        <Muted>Chats with a goal running are left out</Muted>
         <Chips
           options={ManagerWake.options}
           selected={preferences.managerWake}
