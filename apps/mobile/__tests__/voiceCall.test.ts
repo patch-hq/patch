@@ -144,6 +144,22 @@ describe('startVoiceCall — happy path', () => {
     expect(useVoiceStore.getState().callError).toBeNull();
   });
 
+  it('the voice agent ending the call is a clean hang-up: ended sound, bar cleared, no redial', async () => {
+    const { startVoiceCall } = await import('../src/lib/voiceCall');
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeCallTransport.last();
+    sock.emitOpen();
+    sock.emitMessage({ type: 'audio.state', sessionId: 'sess-1', state: 'listening' });
+    playCallSoundMock.mockClear();
+    sock.emitClose(1000, 'ended_by_agent');
+    await flush();
+    expect(useVoiceStore.getState().activeSession).toBeNull();
+    expect(useVoiceStore.getState().callReconnectingSince).toBeNull();
+    expect(playCallSoundMock.mock.calls).toEqual([['ended']]);
+    expect(FakeCallTransport.instances).toHaveLength(1);
+  });
+
   it('a close with no reason is still reported as a dropped call', async () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');

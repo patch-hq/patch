@@ -585,12 +585,21 @@ describe('voiceController', () => {
     }
   });
 
-  it('the connecting pulse plays from the tap until the session opens', async () => {
+  it('the connecting pulse plays from the tap until the provider is ready, then connected', async () => {
     vi.mocked(syncCallSoundLoop).mockClear();
+    const sound = vi.mocked(playCallSound);
     const opening = startVoiceCall('c1');
     expect(looping('connecting')).toBe(true);
     await opening;
+    // The session is open, but the host holds it in `connecting` while the
+    // provider sets up: still connecting, nothing else played.
+    sound.mockClear();
+    lastCallbacks?.onState?.('connecting', 'sess-1');
+    expect(looping('connecting')).toBe(true);
+    expect(sound).not.toHaveBeenCalled();
+    lastCallbacks?.onState?.('listening', 'sess-1');
     expect(looping('connecting')).toBe(false);
+    expect(sound.mock.calls).toEqual([['connected']]);
     endVoiceCall();
   });
 

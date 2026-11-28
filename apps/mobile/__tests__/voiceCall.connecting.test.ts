@@ -155,6 +155,27 @@ describe('connecting → failed after the timeout', () => {
     expect(looping('connecting')).toBe(false);
   });
 
+  it('connecting plays from the tap until the provider is ready, then the connected sound', async () => {
+    playCueMock.mockClear();
+    startVoiceCall('c1');
+    // From the tap, before anything has been minted or dialled.
+    expect(looping('connecting')).toBe(true);
+    await flush();
+    const sock = FakeCallTransport.last();
+    sock.emitOpen();
+    // The host holds the session in `connecting` while the provider sets up
+    // (ElevenLabs takes seconds): still ringing, nothing else played.
+    sock.emitMessage(stateFrame('connecting'));
+    vi.advanceTimersByTime(7_000);
+    sock.emitMessage(stateFrame('connecting'));
+    expect(looping('connecting')).toBe(true);
+    expect(playCueMock).not.toHaveBeenCalled();
+    // The provider is ready: the ring stops and the connected sound plays once.
+    sock.emitMessage(stateFrame('listening'));
+    expect(looping('connecting')).toBe(false);
+    expect(playCueMock.mock.calls).toEqual([['connected']]);
+  });
+
   it('stops ringing when the connect times out', async () => {
     startVoiceCall('c1');
     await flush();

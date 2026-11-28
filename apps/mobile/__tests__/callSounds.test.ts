@@ -1,23 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+// lib/callSounds.ts — the call's own sounds (spec/07 § Call sounds), played by
+// the native PatchCallSounds module as call signalling that takes no audio
+// focus, so the call taking its own focus cannot stop them.
 
-const { createAsync, sounds } = vi.hoisted(() => {
-  const sounds: Array<{
-    stopAsync: ReturnType<typeof vi.fn>;
-    unloadAsync: ReturnType<typeof vi.fn>;
-    setOnPlaybackStatusUpdate: ReturnType<typeof vi.fn>;
-  }> = [];
-  const createAsync = vi.fn(async (_asset: number, _opts: object) => {
-    const sound = {
-      stopAsync: vi.fn(async () => undefined),
-      unloadAsync: vi.fn(async () => undefined),
-      setOnPlaybackStatusUpdate: vi.fn(),
-    };
-    sounds.push(sound);
-    return { sound };
-  });
-  return { createAsync, sounds };
-});
-vi.mock('expo-av', () => ({ Audio: { Sound: { createAsync } } }));
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Image, NativeModules, Platform } from 'react-native';
+
 vi.mock('../src/lib/callSoundAssets', () => ({
   CALL_SOUND_ASSETS: {
     connecting: 1,
@@ -42,30 +29,36 @@ import {
 } from '../src/lib/callSounds';
 import { useUiStore } from '../src/stores/uiStore';
 
+const native = {
+  play: vi.fn(async (_uri: string) => undefined),
+  startLoop: vi.fn(async (_name: string, _uri: string) => undefined),
+  stopLoop: vi.fn(async (_name: string) => undefined),
+};
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 }
 
 describe('call sounds', () => {
   beforeEach(async () => {
+    Platform.OS = 'android';
+    NativeModules['PatchCallSounds'] = native;
+    // Metro's asset ids resolve to the bundled file: here, a raw resource name.
+    (
+      Image as unknown as { resolveAssetSource: (id: number) => { uri: string } }
+    ).resolveAssetSource = (id) => ({ uri: `call_sound_${id}` });
     for (const name of playingCallSoundLoops()) await stopCallSoundLoop(name);
     vi.clearAllMocks();
-    sounds.length = 0;
     useUiStore.setState({ errors: [] });
   });
 
-  it('plays a one-off sound from its own file and unloads it when it finishes', async () => {
+  it('plays a one-off sound from its own bundled file', async () => {
     await playCallSound('reconnected');
-    expect(createAsync).toHaveBeenCalledWith(5, { shouldPlay: true });
-    const onStatus = sounds[0]!.setOnPlaybackStatusUpdate.mock.calls[0]![0] as (s: object) => void;
-    onStatus({ isLoaded: true, didJustFinish: false });
-    expect(sounds[0]!.unloadAsync).not.toHaveBeenCalled();
-    onStatus({ isLoaded: true, didJustFinish: true });
-    expect(sounds[0]!.unloadAsync).toHaveBeenCalled();
+    expect(native.play).toHaveBeenCalledWith('call_sound_5');
   });
 
   it('a sound that cannot play says so', async () => {
-    createAsync.mockRejectedValueOnce(new Error('no output'));
+    native.play.mockRejectedValueOnce(new Error('no output'));
     await playCallSound('ended');
     expect(useUiStore.getState().errors[0]?.message).toContain('ended sound failed: no output');
   });
@@ -73,26 +66,28 @@ describe('call sounds', () => {
   it('loops a looping sound once, however often it is started, until it is stopped', async () => {
     await startCallSoundLoop('reconnecting');
     await startCallSoundLoop('reconnecting');
-    expect(createAsync).toHaveBeenCalledTimes(1);
-    expect(createAsync).toHaveBeenCalledWith(4, { shouldPlay: true, isLooping: true });
+    expect(native.startLoop).toHaveBeenCalledTimes(1);
+    expect(native.startLoop).toHaveBeenCalledWith('reconnecting', 'call_sound_4');
     expect(playingCallSoundLoops()).toEqual(['reconnecting']);
     await stopCallSoundLoop('reconnecting');
-    expect(sounds[0]!.stopAsync).toHaveBeenCalled();
-    expect(sounds[0]!.unloadAsync).toHaveBeenCalled();
+    expect(native.stopLoop).toHaveBeenCalledWith('reconnecting');
     expect(playingCallSoundLoops()).toEqual([]);
     await stopCallSoundLoop('reconnecting');
+    expect(native.stopLoop).toHaveBeenCalledTimes(1);
   });
 
-  it('a loop stopped while it is still loading never plays on', async () => {
+  it('a loop stopped while it is still starting is stopped natively after its start', async () => {
     syncCallSoundLoop('connecting', true);
     syncCallSoundLoop('connecting', false);
     await flush();
-    expect(sounds[0]!.unloadAsync).toHaveBeenCalled();
-    expect(sounds[0]!.stopAsync).not.toHaveBeenCalled();
+    expect(native.startLoop.mock.invocationCallOrder[0]!).toBeLessThan(
+      native.stopLoop.mock.invocationCallOrder[0]!,
+    );
+    expect(playingCallSoundLoops()).toEqual([]);
   });
 
   it('a loop that cannot start says so and can be started again', async () => {
-    createAsync.mockRejectedValueOnce(new Error('busy'));
+    native.startLoop.mockRejectedValueOnce(new Error('busy'));
     await startCallSoundLoop('agent-calling');
     expect(useUiStore.getState().errors[0]?.message).toContain('agent-calling sound failed: busy');
     expect(playingCallSoundLoops()).toEqual([]);
@@ -100,9 +95,9 @@ describe('call sounds', () => {
     expect(playingCallSoundLoops()).toEqual(['agent-calling']);
   });
 
-  it('a failed load after the loop was replaced leaves the new one alone', async () => {
+  it('a failed start after the loop was replaced leaves the new one alone', async () => {
     let reject: (e: Error) => void = () => undefined;
-    createAsync.mockImplementationOnce(
+    native.startLoop.mockImplementationOnce(
       () => new Promise((_res, rej) => (reject = rej as (e: Error) => void)),
     );
     const first = startCallSoundLoop('agent-working');
@@ -115,10 +110,18 @@ describe('call sounds', () => {
 
   it('a loop that will not stop says so', async () => {
     await startCallSoundLoop('connecting');
-    sounds[0]!.stopAsync.mockRejectedValueOnce(new Error('gone'));
+    native.stopLoop.mockRejectedValueOnce(new Error('gone'));
     await stopCallSoundLoop('connecting');
     expect(useUiStore.getState().errors[0]?.message).toContain(
       'stopping the connecting sound failed: gone',
+    );
+  });
+
+  it('there are no call sounds without the native module (NO FALLBACK)', async () => {
+    delete NativeModules['PatchCallSounds'];
+    await playCallSound('connected');
+    expect(useUiStore.getState().errors[0]?.message).toContain(
+      'PatchCallSounds native module missing',
     );
   });
 });
