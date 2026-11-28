@@ -48,6 +48,7 @@ import { useDesktopNavigation } from './lib/desktopNavigation.js';
 import { VoiceBar } from './components/VoiceBar.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { startVoiceNote, cancelVoiceNote } from './lib/voiceController.js';
+import { warmCallSounds } from './lib/callSound.js';
 import { UpdateBanner } from './components/UpdateBanner.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
 import { HostOfflineBanner } from './components/HostOfflineBanner.js';
@@ -2715,6 +2716,12 @@ useChatStore.setState((s) => ({
 // The voice-NOTE path (⌃Space / ⌘; / the new-chat mic) has no composer to drive
 // it in this harness, so an e2e starts one directly and reads the overlay.
 Object.assign(window, { __startVoiceNote: startVoiceNote, __cancelVoiceNote: cancelVoiceNote });
+
+// The real app renders the call sounds at start (main.tsx); a call cue throws if
+// they were not, so the harness does the same.
+warmCallSounds().catch((e: unknown) =>
+  console.error(`call sounds could not be warmed: ${String(e)}`),
+);
 (window as unknown as { __presenceStore?: typeof usePresenceStore }).__presenceStore =
   usePresenceStore;
 // Exposed so specs can play a `settings.changed` (spec/03 § Settings) the way
