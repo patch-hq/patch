@@ -162,6 +162,7 @@ export interface VersionReport {
 
 export * from './agent-return.js';
 export * from './chat-send.js';
+export * from './delay.js';
 export * from './events.js';
 export * from './ownSettings.js';
 export * from './reminder-cadence.js';

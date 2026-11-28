@@ -29,6 +29,7 @@ import {
   backendUsable,
   isReadOnlyMirrorThread,
   isReservedSpecialThread,
+  parseDelayMs,
   pickAvailableModel,
   ReminderEvery,
   SPECIAL_THREAD_IDS,
@@ -2898,6 +2899,25 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         .refine((l) => (l.every === undefined) !== (l.at === undefined), {
           message: "provide exactly one of 'every' or 'at'",
         })
+        .superRefine((l, ctx) => {
+          if (l.every !== undefined) {
+            try {
+              parseDelayMs(l.every);
+            } catch (e) {
+              ctx.addIssue({ code: 'custom', path: ['every'], message: (e as Error).message });
+            }
+          }
+          if (l.at !== undefined && Number.isNaN(Date.parse(l.at))) {
+            ctx.addIssue({ code: 'custom', path: ['at'], message: `invalid timestamp: ${l.at}` });
+          }
+          if (l.notAfter !== undefined && Number.isNaN(Date.parse(l.notAfter))) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['notAfter'],
+              message: `invalid timestamp: ${l.notAfter}`,
+            });
+          }
+        })
         .nullable(),
     })
     .strict();
@@ -2912,7 +2932,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     }
     const parsed = LoopBody.safeParse(req.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+      return reply.code(400).send({
+        error: `invalid loop: ${parsed.error.issues[0]?.message ?? 'invalid body'}`,
+        issues: parsed.error.issues,
+      });
     }
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
