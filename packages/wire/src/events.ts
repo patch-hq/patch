@@ -6841,7 +6841,12 @@ export const PatchListChatsRequestEvent = z
   .object({
     type: z.literal('patch.list_chats.request'),
     sourceChatId: z.string().min(1),
-    archived: z.enum(['only', 'include']).optional(),
+    /**
+     * Which chats to list. Omitted: current chats (not archived, hidden or
+     * snoozed). `archived`: only archived ones. `all`: every chat that is not
+     * deleted: active, hidden, snoozed and archived (finding a chat by name).
+     */
+    scope: z.enum(['archived', 'all']).optional(),
   })
   .strict();
 export type PatchListChatsRequestEvent = z.infer<typeof PatchListChatsRequestEvent>;
@@ -6878,6 +6883,10 @@ export const PatchListChatsResponseEvent = z
            * readers that predate this.
            */
           chatStatus: ChatStatusInfo.optional(),
+          /** The chat is hidden (spec/04 § Hidden). */
+          hidden: z.boolean(),
+          /** The chat is snoozed right now (spec/04 § Snooze). */
+          snoozed: z.boolean(),
           pinned: z.boolean().optional(),
           pinnedAt: z.number().nullable().optional(),
           lastUpdated: z.number().optional(),
@@ -6913,6 +6922,8 @@ export const PatchSearchChatsResponseEvent = z
           name: z.string().nullable(),
           folder: z.string(),
           status: z.enum(['active', 'archived', 'errored', 'deleted']),
+          hidden: z.boolean(),
+          snoozed: z.boolean(),
           lastUpdated: z.number(),
           /** Which part of the chat matched. */
           matchedIn: z.array(z.enum(['name', 'folder', 'summary', 'messages'])),

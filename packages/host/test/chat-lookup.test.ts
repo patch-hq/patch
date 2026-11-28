@@ -1,5 +1,5 @@
 // spec/07 § The voice agent and the chat's agent — finding and reading other
-// chats from any call: one lookup, server-routed, archived chats included.
+// chats from any call: one lookup, server-routed, hidden, snoozed and archived chats included.
 
 import { describe, test, expect, vi } from 'vitest';
 import {
@@ -19,6 +19,8 @@ const CHATS: ChatEntry[] = [
     name: 'Garden planning',
     folder: '/p/garden',
     status: 'active',
+    hidden: false,
+    snoozed: false,
     chatStatus: 'running',
     lastUpdated: NOW - 5 * 60_000,
   },
@@ -27,6 +29,8 @@ const CHATS: ChatEntry[] = [
     name: 'Bus watcher',
     folder: '/p/bus',
     status: 'active',
+    hidden: false,
+    snoozed: false,
     chatStatus: 'idle',
     lastUpdated: NOW - 2 * 3_600_000,
   },
@@ -35,15 +39,39 @@ const CHATS: ChatEntry[] = [
     name: 'Bus timetable import',
     folder: '/p/bus-import',
     status: 'active',
+    hidden: false,
+    snoozed: false,
     chatStatus: 'idle',
     lastUpdated: NOW - 60_000,
   },
   { chatId: 'c-old', name: 'Old thing', folder: '/p/old', status: 'archived' },
   {
+    chatId: 'c-hidden',
+    name: 'Quarterly invoices',
+    folder: '/p/invoices',
+    status: 'active',
+    hidden: true,
+    snoozed: false,
+    chatStatus: 'idle',
+    lastUpdated: NOW - 3_600_000,
+  },
+  {
+    chatId: 'c-snoozed',
+    name: 'Passport renewal',
+    folder: '/p/passport',
+    status: 'active',
+    hidden: false,
+    snoozed: true,
+    chatStatus: 'idle',
+    lastUpdated: NOW - 3_600_000,
+  },
+  {
     chatId: 'c-remote',
     name: 'Laptop build',
     folder: '/p/build',
     status: 'active',
+    hidden: false,
+    snoozed: false,
     chatStatus: 'idle',
     lastUpdated: NOW - 60_000,
   },
@@ -94,6 +122,21 @@ describe('find_chats', () => {
   test('archived chats are found too, and say they are archived', async () => {
     const { tools } = makeLookup();
     expect(await tools.findChats('old', CALLER)).toBe('"Old thing" (id c-old) — archived');
+  });
+
+  test('hidden and snoozed chats are found too, and say so', async () => {
+    const { tools } = makeLookup();
+    expect(await tools.findChats('invoices', CALLER)).toBe(
+      '"Quarterly invoices" (id c-hidden) — hidden, last active 1 h ago',
+    );
+    expect(await tools.findChats('passport', CALLER)).toBe(
+      '"Passport renewal" (id c-snoozed) — snoozed, last active 1 h ago',
+    );
+  });
+
+  test('a hidden chat resolves as a send/switch/status target', async () => {
+    const { tools } = makeLookup();
+    expect((await tools.resolve('quarterly invoices', CALLER)).chatId).toBe('c-hidden');
   });
 
   test('a list the host cannot get is an error, not an empty answer', async () => {
@@ -176,6 +219,47 @@ describe('resolveChat (a chat named on a call)', () => {
     expect(resolveChat(chats, 'tax').chatId).toBe('c3');
     expect(resolveChat(chats, 'c3').chatId).toBe('c3');
   });
+  test('an active chat beats a hidden, snoozed or archived one of the same name', () => {
+    const dup: ChatEntry[] = [
+      {
+        chatId: 'h',
+        name: 'Invoices',
+        folder: '/a',
+        status: 'active',
+        hidden: true,
+        snoozed: false,
+      },
+      {
+        chatId: 's',
+        name: 'Invoices',
+        folder: '/b',
+        status: 'active',
+        hidden: false,
+        snoozed: true,
+      },
+      {
+        chatId: 'x',
+        name: 'Invoices',
+        folder: '/c',
+        status: 'archived',
+        hidden: false,
+        snoozed: false,
+      },
+      {
+        chatId: 'a',
+        name: 'Invoices',
+        folder: '/d',
+        status: 'active',
+        hidden: false,
+        snoozed: false,
+      },
+    ];
+    expect(resolveChat(dup, 'invoices').chatId).toBe('a');
+    expect(resolveChat(dup, 'inv').chatId).toBe('a');
+    // With no active one, the choices are named with where they are kept.
+    expect(() => resolveChat(dup.slice(0, 3), 'invoices')).toThrow(/\(hidden\).*\(snoozed\)/);
+  });
+
   test('of several chats a name fits, the only one not archived is meant', () => {
     const withOld: ChatEntry[] = [
       ...chats,

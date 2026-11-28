@@ -482,7 +482,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
 
     const listed = (await client.callTool({
       name: 'patch_list_chats',
-      arguments: { archived: 'include' },
+      arguments: { scope: 'all' },
     })) as { content: { text: string }[] };
     expect(Array.isArray((JSON.parse(listed.content[0]!.text) as { chats: unknown[] }).chats)).toBe(
       true,

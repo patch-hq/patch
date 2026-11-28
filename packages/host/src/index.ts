@@ -2009,7 +2009,7 @@ async function startHost(
    */
   const requestAccountChats = async (
     sourceChatId: string,
-    archived?: 'only' | 'include',
+    scope?: 'archived' | 'all',
   ): Promise<AccountChat[]> => {
     if (!linkOnline) {
       throw new Error('patch_list_chats: the server link is offline; cannot list other hosts');
@@ -2035,7 +2035,7 @@ async function startHost(
       link.send({
         type: 'patch.list_chats.request',
         sourceChatId,
-        ...(archived !== undefined ? { archived } : {}),
+        ...(scope !== undefined ? { scope } : {}),
       });
     });
   };
@@ -4691,8 +4691,9 @@ async function startHost(
   // would read as "there is no such chat". The status is the server's, for every
   // chat alike (spec/12 § Chat status); this host's own view never overrides it.
   const listAccountChats = async (callerChatId: string): Promise<ChatEntry[]> => {
-    // Archived chats too: a call finds and names them like any other, labelled.
-    const account = await requestAccountChats(callerChatId, 'include');
+    // Every chat that is not deleted: a call finds and names hidden, snoozed and
+    // archived chats like any other, labelled.
+    const account = await requestAccountChats(callerChatId, 'all');
     return account.map((e) => {
       const chatStatus = e['chatStatus'];
       const state =
@@ -4705,6 +4706,8 @@ async function startHost(
         name: str(e['name']) ?? null,
         folder: str(e['folder']) ?? '',
         status: str(e['status']) ?? 'active',
+        hidden: e['hidden'] === true,
+        snoozed: e['snoozed'] === true,
         ...(state !== undefined ? { chatStatus: state } : {}),
         ...(typeof lastUpdated === 'number' ? { lastUpdated } : {}),
       };
@@ -6767,7 +6770,7 @@ async function startHost(
     // host's own answer, so a refusal there fails the tool call here.
     spawnOnRemoteHost,
     // The account-wide chat list (every host's chats, each naming its own).
-    listAccountChats: (sourceChatId, archived) => requestAccountChats(sourceChatId, archived),
+    listAccountChats: (sourceChatId, scope) => requestAccountChats(sourceChatId, scope),
     searchAccountChats: (sourceChatId, query, limit) => requestSearch(sourceChatId, query, limit),
     // `patch_activity` — the user's own messages (gathered by the server from every host's chat logs) and, on request, chat dwell sessions.
     getActivity: (

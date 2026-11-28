@@ -883,7 +883,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.list_chats.request': {
     type: 'patch.list_chats.request',
     sourceChatId: 'c1',
-    archived: 'include',
+    scope: 'all',
   },
   'patch.list_chats.response': {
     type: 'patch.list_chats.response',

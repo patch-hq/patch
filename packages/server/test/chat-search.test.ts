@@ -20,6 +20,7 @@ const chat = (chatId: string, hostId: string, extra: Record<string, unknown> = {
   preview: null,
   folder: '/work',
   status: 'active',
+  hidden: false,
   activity: 'idle',
   pinned: false,
   pinnedAt: null,
@@ -37,7 +38,11 @@ function setup() {
     chat('c-remote', 'host-b', { name: 'Garden', folder: '/home/garden', lastUpdated: 200 }),
     chat('c-nolog', 'host-b', { name: 'Old', statusSummary: 'waiting on deploy approval' }),
   ];
-  const chatRegistry = { list: () => chats, get: () => undefined } as unknown as ChatRegistry;
+  const chatRegistry = {
+    list: () => chats,
+    get: () => undefined,
+    isSnoozed: () => false,
+  } as unknown as ChatRegistry;
   const store = new ChatLogStore({ logger });
   store.commit(msg('c-remote', 1, 'user', 'can you check the DEPLOY of the greenhouse sensors?'));
   store.commit(msg('c-remote', 2, 'assistant', 'nothing relevant here'));

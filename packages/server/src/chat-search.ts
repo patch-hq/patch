@@ -19,6 +19,8 @@ export interface ChatSearchResult {
   name: string | null;
   folder: string;
   status: 'active' | 'archived' | 'errored' | 'deleted';
+  hidden: boolean;
+  snoozed: boolean;
   lastUpdated: number;
   matchedIn: SearchField[];
   excerpts: Array<{ seq: number; role: string; text: string }>;
@@ -49,7 +51,11 @@ export async function searchChats(
   const needle = query.toLowerCase();
   const hits: Array<ChatSearchResult & { score: number }> = [];
   let chatsWithoutLog = 0;
-  for (const chat of deps.chatRegistry.list({ includeArchived: true })) {
+  for (const chat of deps.chatRegistry.list({
+    includeArchived: true,
+    includeSnoozed: true,
+    includeHidden: true,
+  })) {
     await new Promise<void>((resolve) => setImmediate(resolve));
     const matchedIn: SearchField[] = [];
     if (chat.name?.toLowerCase().includes(needle)) matchedIn.push('name');
@@ -82,6 +88,8 @@ export async function searchChats(
       name: chat.name,
       folder: chat.folder,
       status: chat.status,
+      hidden: chat.hidden,
+      snoozed: deps.chatRegistry.isSnoozed(chat),
       lastUpdated: chat.lastUpdated,
       matchedIn,
       excerpts,
