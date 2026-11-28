@@ -182,6 +182,17 @@ describe('OpenAIRealtimeSession', () => {
     expect(events).toContainEqual({ type: 'audio.state', sessionId: 'sess-1', state: 'listening' });
   });
 
+  test("bounds the live context with the provider's own retention-ratio truncation", async () => {
+    const { deps, last } = makeDeps();
+    const ws = await open(new OpenAIRealtimeSession(makeInit(), deps), last);
+    const update = ws.ofType('session.update')[0] as { session: { truncation: unknown } };
+    expect(update.session.truncation).toEqual({
+      type: 'retention_ratio',
+      retention_ratio: 0.8,
+      token_limits: { post_instructions: 8000 },
+    });
+  });
+
   test('mic frames queued before setup are flushed afterwards, upsampled to 24 kHz', async () => {
     const { deps, last } = makeDeps();
     const session = new OpenAIRealtimeSession(makeInit(), deps);
