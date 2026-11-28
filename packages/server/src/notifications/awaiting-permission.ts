@@ -125,6 +125,12 @@ export class AwaitingPermissionNotifier {
       });
       return;
     }
+    if (event.type === 'chat.permission_response') {
+      if (this.pendingAsk.get(event.chatId)?.requestId === event.requestId) {
+        this.pendingAsk.delete(event.chatId);
+      }
+      return;
+    }
     if (event.type === 'patch.browser_handoff.state') {
       if (event.shared) return;
       if (event.status === 'waiting') this.pendingHandoff.set(event.chatId, event.reason);
@@ -138,10 +144,10 @@ export class AwaitingPermissionNotifier {
     this.lastActivity.set(chatId, event.activity);
 
     if (event.activity !== 'awaiting-permission') {
-      // The turn is over (or moving again): anything still recorded describes a
-      // request that has been answered or abandoned, and must not be used to
-      // describe some later block.
-      if (event.activity !== 'running') this.pendingAsk.delete(chatId);
+      // A request is forgotten when it is answered (`chat.permission_response`,
+      // above), not when the chat goes quiet: a question can stay open across
+      // the end of a turn, and the server still counts it as open, so the next
+      // turn that blocks on it needs it described.
       return;
     }
 
