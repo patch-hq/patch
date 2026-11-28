@@ -2640,6 +2640,15 @@ describe('chatStore — chat.stopped (a stopped or interrupted turn)', () => {
     expect(user?.turnStopped).toBeUndefined();
   });
 
+  it('marks a turn the host names interrupted as interrupted even when the chat has already settled idle', () => {
+    const s = useChatStore.getState();
+    seedRunningTurn('c1');
+    s.applyEvent({ type: 'chat.stopped', chatId: 'c1', reason: 'interrupted' });
+    const user = (useChatStore.getState().timelines['c1'] ?? []).find((e) => e.role === 'user');
+    expect(user?.turnInterrupted).toBe(true);
+    expect(user?.turnStopped).toBeUndefined();
+  });
+
   it('marks the turn that was RUNNING, not a message still queued behind it', () => {
     const s = useChatStore.getState();
     seedRunningTurn('c1');

@@ -241,7 +241,9 @@ describe('message queueing (spec/04)', () => {
     await daemon.promoteInput(chatId, 'L3');
     await tick();
 
-    expect(events.some((e) => e.type === 'chat.stopped')).toBe(true);
+    const stops = events.filter((e) => e.type === 'chat.stopped');
+    expect(stops).toHaveLength(1);
+    expect((stops[0] as { reason: string }).reason).toBe('interrupted');
     // 'two' was already scheduled to run sooner and still runs first.
     expect(g.prompts).toEqual(['one', 'two']);
 
