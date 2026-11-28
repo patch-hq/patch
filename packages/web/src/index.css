@@ -19775,7 +19775,7 @@ a.drop-target,
   cursor: pointer;
 }
 .reach-switch:hover:not(:disabled) {
-  border-color: var(--accent-soft, var(--line));
+  border-color: var(--accent-soft);
 }
 .reach-switch.auto {
   background: var(--accent);
