@@ -6480,9 +6480,9 @@ export class Daemon {
   /**
    * The Manager's bounded context (spec/06 § Bounded context), through
    * what the provider supports: a fresh session, never a rebuilt one. Once
-   * the current session has carried more than `managerContextWindow`
-   * messages, the session is retired, a divider marks it, and the last
-   * `window` messages from Patch's record are returned as a `Handoff` note for
+   * the current session holds `managerContextWindow` messages, counting the
+   * ones it was handed, the session is retired, a divider marks it, and the
+   * last half-window of messages from Patch's record are returned as a `Handoff` note for
    * the front of this turn's message — recorded and shown like every note, so
    * nothing reaches the model unseen. Empty when no handover is due.
    */
@@ -6491,10 +6491,9 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     const meta = this.opts.metaStore.read(chatId);
     if (window === undefined || window <= 0 || !state?.sessionId || !meta) return '';
-    const from = meta.sessionFromSeq ?? 0;
-    if (this.recordMessages(chatId).filter((m) => m.seq >= from).length <= window) return '';
+    if (this.sessionMessages(chatId, meta) < window) return '';
     const handoff = this.recordHandoff(chatId, carriedMessages(window));
-    this.retireSession(chatId);
+    this.retireSession(chatId, handoff.carried);
     this.emit({
       type: 'chat.message',
       chatId,
@@ -6508,6 +6507,20 @@ export class Daemon {
       'manager: fresh session, recent conversation carried in a visible note',
     );
     return handoff.note;
+  }
+
+  /**
+   * The messages the chat's current session holds: those handed to it in its
+   * `Handoff` note and those recorded since it began.
+   */
+  private sessionMessages(
+    chatId: string,
+    meta: { sessionFromSeq?: number; sessionCarried?: number },
+  ): number {
+    const from = meta.sessionFromSeq ?? 0;
+    return (
+      (meta.sessionCarried ?? 0) + this.recordMessages(chatId).filter((m) => m.seq >= from).length
+    );
   }
 
   /** The chat's user and assistant messages on its active track, from Patch's record. */
@@ -6548,18 +6561,31 @@ export class Daemon {
     };
   }
 
-  /** Clear the chat's session so its next turn starts a fresh one. */
-  private retireSession(chatId: string): void {
+  /**
+   * Clear the chat's session so its next turn starts a fresh one. `carried`
+   * is how many messages that fresh session is handed in a `Handoff` note.
+   */
+  private retireSession(chatId: string, carried = 0): void {
     const state = this.chatState.get(chatId);
     if (state) {
       state.sessionId = undefined;
       state.sessionAccountId = undefined;
     }
     this.opts.metaStore.update(chatId, (m) => {
-      const { sessionId: _session, sessionAccountId: _account, ...rest } = m;
+      const {
+        sessionId: _session,
+        sessionAccountId: _account,
+        sessionCarried: _carried,
+        ...rest
+      } = m;
       void _session;
       void _account;
-      return { ...rest, updatedAt: this.opts.now() };
+      void _carried;
+      return {
+        ...rest,
+        ...(carried > 0 ? { sessionCarried: carried } : {}),
+        updatedAt: this.opts.now(),
+      };
     });
   }
 
@@ -6618,7 +6644,7 @@ export class Daemon {
       seq: this.bumpSeq(chatId),
       createdAt: this.opts.now(),
     });
-    this.retireSession(chatId);
+    this.retireSession(chatId, handoff.carried);
     this.opts.logger.info(
       { chatId, carried: handoff.carried },
       'rotateThread: session rotated, fresh session gets a visible handoff from the record',
@@ -13214,7 +13240,8 @@ export class Daemon {
         const sessionFromSeq =
           userMessageSeq ?? Math.max(0, this.chatLog.recordedHighWater(chatId));
         this.opts.metaStore.update(chatId, (m) => ({
-          ...m,
+          // A session the provider moved to on its own was handed nothing.
+          ...(previous !== undefined ? { ...m, sessionCarried: undefined } : m),
           sessionId: env.sessionId,
           sessionFromSeq,
           sessionStartedAt: this.opts.now(),
@@ -16850,9 +16877,8 @@ export class Daemon {
     if (sessionId === undefined || !meta) return null;
     const cached = this.sessionInfoCache.get(chatId);
     if (cached && cached.lastSeq === lastSeq && cached.sessionId === sessionId) return cached.info;
-    const from = meta.sessionFromSeq ?? 0;
     const info = {
-      messages: this.recordMessages(chatId).filter((m) => m.seq >= from).length,
+      messages: this.sessionMessages(chatId, meta),
       startedAt: meta.sessionStartedAt ?? meta.updatedAt,
     };
     this.sessionInfoCache.set(chatId, { lastSeq, sessionId, info });
