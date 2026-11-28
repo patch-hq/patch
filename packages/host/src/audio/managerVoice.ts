@@ -272,7 +272,9 @@ export const MANAGER_ASYNC_REPLY_RULE =
   `${SEND_TO_CHAT_TOOL_NAME} answers as soon as the chat has the message. Say in a few words ` +
   'that it has gone — vary how you say it — then carry on. When the chat answers, its reply ' +
   'arrives as a message naming the chat: tell the user the gist in one or two short sentences, ' +
-  'not the whole text, and let them ask for more. Several chats can be working at once. Never say ' +
+  'not the whole text, and let them ask for more. If the reply is only a receipt — the chat saying ' +
+  'it has passed the request on or sent it to another chat, with no answer in it — say nothing: ' +
+  'you have already told the user it has gone. Several chats can be working at once. Never say ' +
   '"still waiting" unless the user asks how one is going.\n\n';
 
 /** The blocking variant (OpenAI Realtime, ElevenLabs): the call returns the chat's reply. */
@@ -285,7 +287,8 @@ export const MANAGER_BLOCKING_REPLY_RULE =
 export function managerReplyMessage(name: string, message: string, reply: string): string {
   return (
     `The chat "${name}" has answered the message you sent it ("${message}"). ` +
-    `Its reply, to tell the user now, in your own words: ${reply}`
+    `Its reply, to tell the user now, in your own words (if it is only a receipt that the request ` +
+    `was passed on or sent elsewhere, with no answer, say nothing): ${reply}`
   );
 }
 
