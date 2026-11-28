@@ -540,12 +540,6 @@ interface ChatState {
   /** An older page is on its way for this chat. */
   historyLoadingEarlier: Record<string, true>;
   setHistoryLoadingEarlier(chatId: string, on: boolean): void;
-  /**
-   * Put a chat's committed entries back in record order once an older page has
-   * landed after them. Entries not yet committed (an unsent message, a reply
-   * still streaming) keep their place at the end.
-   */
-  orderTimelineBySeq(chatId: string): void;
   /** Nothing in flight any more — the socket that carried the asks is gone. */
   clearReplaying(): void;
   /** Drop a chat row + its timeline (post-DELETE). */
@@ -1599,9 +1593,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // below the live transcript and never interleaves with the running turn's
     // ongoing output). Queued entries are held at the tail, so a new live entry
     // slots in just before that trailing block.
+    /**
+     * An entry's place is its seq, the number it was given when it happened:
+     * it goes ahead of the first entry with a later seq, whenever it arrives.
+     * With none later it goes at the end, ahead of any queued messages.
+     */
     function insertLive(list: ChatEventEntry[], entry: ChatEventEntry): void {
       let at = list.length;
       while (at > 0 && list[at - 1]?.queued) at--;
+      if (entry.seq >= 0) {
+        // Only committed entries have a place by seq: a message still being
+        // sent (`localId`) or streamed sits at the end until it is committed.
+        const later = list.findIndex(
+          (e) => e.seq > entry.seq && e.localId === undefined && e.streaming !== true,
+        );
+        if (later >= 0) at = later;
+      }
       list.splice(at, 0, entry);
     }
 
@@ -2323,7 +2330,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // than showing it once, but dropping a user message the host
             // really did persist would be hiding it, which is the bug.
           }
-          // ALREADY HELD: this exact persisted turn is in the timeline. A surface
+          // ALREADY HELD: this persisted turn is in the timeline. A surface
           // can be handed the same transcript more than once — opening a chat asks
           // for a replay, and the socket completing its connect a moment later
           // asks again for every held chat, both with `fromSeq: -1` because
@@ -2343,15 +2350,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     e.kind === 'message' &&
                     e.seq === event.seq &&
                     e.role === event.role &&
-                    e.content === content &&
+                    // A reply is the same message however its words have changed
+                    // (a spoken reply grows and is cut in place); a user turn
+                    // must also be the same text, as replayed history can carry
+                    // seqs that collide with a live one.
+                    (event.role === 'assistant' || e.content === content) &&
                     e.localId === undefined &&
                     e.streaming !== true,
                 )
               : -1;
             if (held >= 0 && list) {
+              // The same message at the same seq, as last written: a spoken
+              // reply is changed in place (more words, a cut, a correction).
               const updated = [...list];
               updated[held] = {
                 ...updated[held]!,
+                // A user's message keeps what was typed; a reply is as last written.
+                ...(event.role === 'assistant' ? { content } : {}),
+                ...(spoken ? { voice: true } : {}),
                 ...(event.createdAt !== undefined ? { messageAt: event.createdAt } : {}),
                 ...(event.attachments && event.attachments.length > 0
                   ? { attachments: event.attachments }
@@ -3576,26 +3592,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({ timelines: { ...s.timelines, [chatId]: [] } }));
   },
 
-  orderTimelineBySeq(chatId) {
-    set((st) => {
-      const cur = st.timelines[chatId];
-      if (!cur || cur.length < 2) return st;
-      const committed = cur.filter(
-        (e) => e.localId === undefined && e.streaming !== true && e.seq >= 0,
-      );
-      const rest = cur.filter(
-        (e) => !(e.localId === undefined && e.streaming !== true && e.seq >= 0),
-      );
-      const ordered = [...committed].sort((a, b) => a.seq - b.seq);
-      if (
-        ordered.every((e, i) => e === committed[i]) &&
-        rest.length === cur.length - committed.length &&
-        committed.every((e, i) => cur[i] === e)
-      )
-        return st;
-      return { timelines: { ...st.timelines, [chatId]: [...ordered, ...rest] } };
-    });
-  },
   setHistoryMore(chatId, more) {
     set((st) => {
       if ((st.historyMore[chatId] ?? false) === more) return st;

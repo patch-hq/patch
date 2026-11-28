@@ -88,24 +88,46 @@ describe('voice exchanges in the chat timeline', () => {
     ).toEqual(['[voice • web] what is a nebula', 'A cloud of gas and dust.']);
   });
 
-  it('streams a fast-voice reply as deltas on a reserved seq, then finalises it on that seq', async () => {
+  it('a spoken reply is one message at its seq: updating it changes it in place and never adds one', async () => {
     const { daemon, events, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     events.length = 0;
 
-    const seq = daemon.reserveVoiceSeq(chatId);
-    daemon.emitVoiceDelta(chatId, seq, 'A cloud ');
-    daemon.emitVoiceDelta(chatId, seq, 'of gas.');
-    daemon.recordVoiceMessage({ chatId, role: 'assistant', content: 'A cloud of gas.', seq });
+    const seq = daemon.recordVoiceMessage({
+      chatId,
+      role: 'assistant',
+      content: 'A cloud',
+      createdAt: 100,
+    });
+    // An agent message arrives while the reply is still being spoken.
+    const agentSeq = daemon.recordVoiceMessage({
+      chatId,
+      role: 'assistant',
+      content: 'agent says',
+      owed: false,
+    });
+    daemon.updateVoiceMessage({
+      chatId,
+      role: 'assistant',
+      seq,
+      content: 'A cloud of gas.',
+      createdAt: 100,
+    });
 
-    const deltas = events.filter((e) => e.type === 'chat.message_delta');
-    expect(deltas).toEqual([
-      { type: 'chat.message_delta', chatId, messageSeq: seq, delta: 'A cloud ' },
-      { type: 'chat.message_delta', chatId, messageSeq: seq, delta: 'of gas.' },
+    const all = messages(events);
+    expect(all.map((m) => [m.seq, m.content])).toEqual([
+      [seq, 'A cloud'],
+      [agentSeq, 'agent says'],
+      [seq, 'A cloud of gas.'],
     ]);
-    const final = messages(events).at(-1)!;
-    expect(final.seq).toBe(seq);
-    expect(final.content).toBe('A cloud of gas.');
+    expect(agentSeq).toBeGreaterThan(seq);
+    expect(all.at(-1)!.createdAt).toBe(100);
+    // The history holds the reply once, at its own seq, as last written.
+    const hist = messages(daemon.readHistory({ chatId, after: -1 }).events as WireEvent[]);
+    expect(hist.map((m) => [m.seq, m.content])).toEqual([
+      [seq, 'A cloud of gas.'],
+      [agentSeq, 'agent says'],
+    ]);
   });
 
   it("tells the agent's next turn what was said by voice, once, as a visible note", async () => {

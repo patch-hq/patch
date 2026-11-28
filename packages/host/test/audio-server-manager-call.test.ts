@@ -236,7 +236,7 @@ describe('audio server — a hosted call to the Manager', () => {
         makeVad: () => new SilentVad(),
         makeTimeline: () => ({
           userSaid() {},
-          beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+          beginReply: () => ({ set() {}, finish() {} }),
         }),
         voiceAgentLink: {
           ...fakeVoiceAgentLink({

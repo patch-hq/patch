@@ -59,14 +59,16 @@ const timeline = () => ({
   },
   beginReply(chatId: string) {
     let text = '';
+    let logged = '';
     return {
-      append: (d: string) => {
-        text += d;
+      set: (t: string) => {
+        text = t;
       },
       finish: () => {
+        if (text === logged) return;
+        logged = text;
         this.log.push(`reply:${chatId}:${text}`);
       },
-      text: () => text,
     };
   },
 });

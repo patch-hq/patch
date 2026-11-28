@@ -4736,8 +4736,7 @@ async function startHost(
   const chatVoice = createChatVoice({
     daemon: {
       recordVoiceMessage: (r) => daemon.recordVoiceMessage(r),
-      reserveVoiceSeq: (chatId) => daemon.reserveVoiceSeq(chatId),
-      emitVoiceDelta: (chatId, seq, delta) => daemon.emitVoiceDelta(chatId, seq, delta),
+      updateVoiceMessage: (r) => daemon.updateVoiceMessage(r),
       recordCallSummary: (chatId, line) => daemon.recordCallSummary(chatId, line),
       recordCallNote: (chatId, line) => daemon.recordCallNote(chatId, line),
       recordVoiceHandoff: (handoff) => daemon.recordVoiceHandoff(handoff),

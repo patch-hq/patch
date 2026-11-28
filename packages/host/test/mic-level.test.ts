@@ -81,7 +81,7 @@ describe('a call whose microphone sends silence', () => {
         instructions: DEFAULT_VOICE_INSTRUCTIONS,
         timeline: {
           userSaid: () => {},
-          beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+          beginReply: () => ({ set() {}, finish() {} }),
         },
         apiKey: 'k',
         wsCtor: function () {

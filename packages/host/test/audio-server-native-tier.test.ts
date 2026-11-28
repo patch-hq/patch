@@ -130,7 +130,7 @@ describe('audio server — voice config matrix selection', () => {
     const handle = await startAudioServer({
       makeTimeline: () => ({
         userSaid() {},
-        beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+        beginReply: () => ({ set() {}, finish() {} }),
       }),
       voiceAgentLink: fakeVoiceAgentLink().link,
       getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,

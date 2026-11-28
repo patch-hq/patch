@@ -9296,32 +9296,33 @@ export class Daemon {
    */
   private readonly pendingVoiceExchanges = new Map<
     string,
-    Array<{ role: 'user' | 'assistant'; text: string }>
+    Array<{ role: 'user' | 'assistant'; text: string; seq: number }>
   >();
 
   /**
    * Write one spoken message into a chat's timeline as an ordinary
    * `chat.message`, with no agent turn: a fast-voice exchange the agent never
-   * ran for. `seq` finalises a reply that was streamed on a reserved seq
-   * (`reserveVoiceSeq` / `emitVoiceDelta`). Returns the seq it landed on.
+   * ran for. Returns the seq it landed on; a reply that is still being spoken
+   * is changed later with `updateVoiceMessage` at that seq.
    */
   recordVoiceMessage(req: {
     chatId: string;
     role: 'user' | 'assistant';
     content: string;
-    seq?: number;
+    /** When it was said; now when absent. A later update keeps this time. */
+    createdAt?: number;
     /** False for a line the agent is about to be given itself (a hand-off), so it is not also owed as a note. */
     owed?: boolean;
   }): number {
     if (!this.chatState.has(req.chatId)) throw new ChatNotFoundError(req.chatId);
-    const seq = req.seq ?? this.bumpSeq(req.chatId);
+    const seq = this.bumpSeq(req.chatId);
     this.emit({
       type: 'chat.message',
       chatId: req.chatId,
       role: req.role,
       content: req.content,
       seq,
-      createdAt: this.opts.now(),
+      createdAt: req.createdAt ?? this.opts.now(),
     });
     if (req.owed === false) return seq;
     let owed = this.pendingVoiceExchanges.get(req.chatId);
@@ -9329,8 +9330,33 @@ export class Daemon {
       owed = [];
       this.pendingVoiceExchanges.set(req.chatId, owed);
     }
-    owed.push({ role: req.role, text: stripVoiceTag(req.content) });
+    owed.push({ role: req.role, text: stripVoiceTag(req.content), seq });
     return seq;
+  }
+
+  /**
+   * Change a spoken message already in the chat, in place at its own seq: more
+   * of a reply being spoken, its cut, a provider's correction. Never adds or
+   * moves a message. A line the agent has already been given stays as it was.
+   */
+  updateVoiceMessage(req: {
+    chatId: string;
+    role: 'user' | 'assistant';
+    seq: number;
+    content: string;
+    createdAt: number;
+  }): void {
+    if (!this.chatState.has(req.chatId)) throw new ChatNotFoundError(req.chatId);
+    this.emit({
+      type: 'chat.message',
+      chatId: req.chatId,
+      role: req.role,
+      content: req.content,
+      seq: req.seq,
+      createdAt: req.createdAt,
+    });
+    const owed = this.pendingVoiceExchanges.get(req.chatId)?.find((o) => o.seq === req.seq);
+    if (owed) owed.text = stripVoiceTag(req.content);
   }
 
   /** True while an agent turn is running on `chatId`. */
@@ -9364,17 +9390,6 @@ export class Daemon {
   recordVoiceHandoff(handoff: Omit<ChatVoiceHandoffEvent, 'type' | 'seq' | 'branchId'>): void {
     if (!this.chatState.has(handoff.chatId)) throw new ChatNotFoundError(handoff.chatId);
     this.emit({ type: 'chat.voice_handoff', ...handoff, seq: this.bumpSeq(handoff.chatId) });
-  }
-
-  /** Reserve the seq a streamed fast-voice reply will finalise on. */
-  reserveVoiceSeq(chatId: string): number {
-    if (!this.chatState.has(chatId)) throw new ChatNotFoundError(chatId);
-    return this.bumpSeq(chatId);
-  }
-
-  /** One live chunk of a streamed fast-voice reply (live-only, never persisted). */
-  emitVoiceDelta(chatId: string, messageSeq: number, delta: string): void {
-    this.emit({ type: 'chat.message_delta', chatId, messageSeq, delta });
   }
 
   /**

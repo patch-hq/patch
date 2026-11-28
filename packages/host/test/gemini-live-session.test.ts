@@ -63,22 +63,20 @@ export class FakeTimeline {
   userSaid(chatId: string, text: string): void {
     this.log.push(`user:${chatId}:${text}`);
   }
-  beginReply(chatId: string): {
-    append(d: string): void;
-    finish(heard?: string): void;
-    text(): string;
-  } {
+  beginReply(chatId: string): { set(text: string): void; finish(): void } {
     let text = '';
+    let logged = '';
     this.log.push(`begin:${chatId}`);
     return {
-      append: (d: string) => {
-        text += d;
-        this.log.push(`delta:${d}`);
+      set: (t: string) => {
+        this.log.push(`delta:${t.slice(text.length)}`);
+        text = t;
       },
-      finish: (heard?: string) => {
-        this.log.push(`reply:${chatId}:${heard ?? text}`);
+      finish: () => {
+        if (text === logged) return;
+        logged = text;
+        this.log.push(`reply:${chatId}:${text.trim()}`);
       },
-      text: () => text,
     };
   }
 }

@@ -27,7 +27,7 @@ export function fakeVoiceAgent(): Pick<
     } as unknown as AudioServerOptions['geminiWsCtor'],
     makeTimeline: () => ({
       userSaid() {},
-      beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+      beginReply: () => ({ set() {}, finish() {} }),
     }),
     voiceAgentLink: fakeVoiceAgentLink().link,
     getVoiceInstructions: () => 'Be the voice of this chat.',
