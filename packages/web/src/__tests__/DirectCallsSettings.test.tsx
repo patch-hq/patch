@@ -63,6 +63,16 @@ const DEVICES = [
     speechEngines: MAC,
   },
   {
+    surfaceId: 'web-2',
+    surfaceKind: 'web',
+    label: 'Browser',
+    issuedAt: 5,
+    status: 'online',
+    lastHeartbeat: 1,
+    isCurrent: false,
+    speechEngines: { stt: [MAC.stt[1]], tts: [MAC.tts[1]] },
+  },
+  {
     surfaceId: 'old-1',
     surfaceKind: 'web',
     label: 'Old browser',
@@ -107,8 +117,10 @@ describe('Direct calls', () => {
     expect(screen.getByTestId('direct-linux-1-summary')).toHaveTextContent('No speech engine');
     expect(screen.getByTestId('direct-linux-1-row')).toHaveTextContent('seen 1h ago');
     expect(screen.getByTestId('direct-old-1-summary')).toHaveTextContent('Not reported yet');
-    // Engines but nothing saved: it is set up by the user, never by a pick.
-    expect(screen.getByTestId('direct-mac-2-summary')).toHaveTextContent('Set up');
+    // Nothing saved: it runs on its own engines, so there is nothing to set up.
+    expect(screen.getByTestId('direct-mac-2-summary')).toHaveTextContent('Parakeet → Kokoro');
+    // Only cloud engines and nothing picked: that is left to the user.
+    expect(screen.getByTestId('direct-web-2-summary')).toHaveTextContent('Set up');
   });
 
   it('opens to its steps, offering only what the device reported, labelled On device / Cloud', async () => {
@@ -133,21 +145,28 @@ describe('Direct calls', () => {
     expect(screen.queryByTestId('direct-mac-1-tone')).toBeNull();
   });
 
-  it('an unset device offers its steps one at a time, choosing nothing for it, and writes each choice', async () => {
+  it('a device with nothing saved shows its own engines as chosen, and a pick is written', async () => {
     const server = setup();
     renderSettings('/settings/voice');
     fireEvent.click(within(await screen.findByTestId('direct-mac-2-row')).getByRole('button'));
-    expect(screen.getByTestId('direct-mac-2-stt-parakeet')).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
-    expect(screen.queryByTestId('direct-mac-2-stt-model')).toBeNull();
-    expect(screen.queryByTestId('direct-mac-2-tts')).toBeNull();
+    expect(screen.getByTestId('direct-mac-2-stt-parakeet')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('direct-mac-2-tts-kokoro')).toHaveAttribute('aria-pressed', 'true');
+    expect((screen.getByTestId('direct-mac-2-voice') as HTMLSelectElement).value).toBe('af_heart');
     fireEvent.click(screen.getByTestId('direct-mac-2-stt-groq'));
     await waitFor(() => expect(server.writes).toHaveLength(1));
     expect(server.writes[0]).toEqual({
       deviceDirectCall: { 'mac-1': MAC_SETUP, 'mac-2': { stt: { engine: 'groq' } } },
     });
+  });
+
+  it('this device’s row is open on arrival when it still has a step to pick', async () => {
+    setup();
+    usePresenceStore.setState({ surfaceId: 'web-2' });
+    renderSettings('/settings/voice');
+    expect(await screen.findByTestId('direct-web-2-stt-groq')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 
   it('a new text to speech engine starts its own steps over', async () => {

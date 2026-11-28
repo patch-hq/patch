@@ -38,35 +38,65 @@ describe('resolveDirectCall', () => {
     });
   });
 
-  it('with no setup saved the device is not set up: nothing is chosen for it', () => {
-    expect(resolveDirectCall(desktop, undefined, {})).toEqual({ ok: false, reason: NOT_SET_UP });
-    expect(
-      resolveDirectCall(
-        desktop,
-        { stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' } },
-        {},
-      ),
-    ).toEqual({ ok: false, reason: NOT_SET_UP });
-    // A setup missing a model or a voice is not finished either.
-    expect(
-      resolveDirectCall(
-        desktop,
-        {
-          stt: { engine: 'parakeet' },
-          tts: { engine: 'kokoro', model: 'kokoro-82m', voice: 'af_heart' },
-        },
-        {},
-      ),
-    ).toEqual({ ok: false, reason: NOT_SET_UP });
-    const done = resolveDirectCall(
+  it('with nothing saved a device runs on its own engines, each engine’s first model and voice', () => {
+    const r = resolveDirectCall(desktop, undefined, {});
+    expect(r.ok && r.call.stt).toEqual({
+      engine: 'parakeet',
+      where: 'device',
+      model: 'parakeet-tdt-0.6b-v3',
+    });
+    expect(r.ok && r.call.tts.engine).toBe('kokoro');
+    expect(r.ok && r.call.tts.voice).toBe('af_heart');
+    // A phone: Android in and out, nothing to pick.
+    const phone: SpeechEngineReport = {
+      stt: [{ engine: 'android', where: 'device', models: ['default'] }],
+      tts: [{ engine: 'android', where: 'device', models: ['default'], voices: ['en-gb-x-1'] }],
+    };
+    const p = resolveDirectCall(phone, undefined, {});
+    expect(p.ok && directCallSummary(p.call)).toBe('Android → Android');
+  });
+
+  it('fills only what is not chosen: a saved engine keeps its place, its model is its first', () => {
+    const r = resolveDirectCall(
       desktop,
-      {
-        stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' },
-        tts: { engine: 'kokoro', model: 'kokoro-82m', voice: 'af_heart' },
-      },
+      { stt: { engine: 'groq' }, tts: { engine: 'elevenlabs', voice: 'v2' } },
       {},
     );
-    expect(done.ok && directCallSummary(done.call)).toBe('Parakeet → Kokoro');
+    expect(r.ok && r.call.stt.model).toBe('whisper-large-v3-turbo');
+    expect(r.ok && r.call.tts).toMatchObject({
+      engine: 'elevenlabs',
+      model: 'eleven_flash_v2_5',
+      voice: 'v2',
+    });
+    // Speech to text chosen, text to speech not: the device's own.
+    const s = resolveDirectCall(desktop, { stt: { engine: 'groq' } }, {});
+    expect(s.ok && directCallSummary(s.call)).toBe('Groq Whisper → Kokoro');
+  });
+
+  it('a step with no on-device engine and nothing chosen is left to pick (a browser)', () => {
+    const browser: SpeechEngineReport = {
+      stt: [desktop.stt[0]!],
+      tts: [desktop.tts[0]!],
+    };
+    expect(resolveDirectCall(browser, undefined, {})).toEqual({ ok: false, reason: NOT_SET_UP });
+    const r = resolveDirectCall(
+      browser,
+      { stt: { engine: 'groq' }, tts: { engine: 'elevenlabs' } },
+      {},
+    );
+    expect(r.ok && directCallSummary(r.call)).toBe('Groq Whisper → ElevenLabs');
+  });
+
+  it('a saved choice the device no longer has is refused, not swapped', () => {
+    const r = resolveDirectCall(
+      desktop,
+      { stt: { engine: 'parakeet', model: 'gone' }, tts: { engine: 'kokoro' } },
+      {},
+    );
+    expect(r).toEqual({
+      ok: false,
+      reason: expect.stringMatching(/no longer has the model gone/),
+    });
   });
 
   it('runs the saved setup: the engine’s controls, stored or default, and the voice’s tone', () => {
@@ -270,15 +300,24 @@ describe('cloudSpeechEnginesFromHosts', () => {
 });
 
 describe('Settings steps (directCallSteps / changeDirectCall)', () => {
-  it('offers only what the device reported, on-device first; with nothing saved, nothing is chosen', () => {
+  it('offers only what the device reported, on-device first; with nothing saved, shows the device’s own', () => {
     const s = directCallSteps(desktop, undefined, {});
     expect(s.stt.options).toEqual([
       { engine: 'parakeet', label: 'Parakeet', where: 'device' },
       { engine: 'groq', label: 'Groq Whisper', where: 'cloud' },
     ]);
     expect(s.tts.options.map((o) => o.engine)).toEqual(['kokoro', 'elevenlabs']);
+    expect(s.stt.engine).toBe('parakeet');
+    expect(s.sttModel.value).toBe('parakeet-tdt-0.6b-v3');
+    expect(s.tts.engine).toBe('kokoro');
+    expect(s.voice.value).toBe('af_heart');
+    expect(s.summary).toBe('Parakeet → Kokoro');
+    expect(s.problem).toBeUndefined();
+  });
+
+  it('a device with only cloud engines reads Set up, with nothing chosen', () => {
+    const s = directCallSteps({ stt: [desktop.stt[0]!], tts: [desktop.tts[0]!] }, undefined, {});
     expect(s.stt.engine).toBeUndefined();
-    expect(s.tts.engine).toBeUndefined();
     expect(s.summary).toBe('Set up');
     expect(s.problem).toBeUndefined();
   });

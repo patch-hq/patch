@@ -26,6 +26,7 @@ import { space, typography, useTheme } from '../../lib/theme';
 import { OptionPicker } from '../OptionPicker';
 import { SettingsSection } from '../SettingsSection';
 import { deviceSubtitle } from './DevicesSections';
+import { usePresenceStore } from '../../stores/presenceStore';
 import { patchShared } from './sharedWrite';
 import { Chevron, Chips, Muted, Row, RowValue, SettingsButton, WithSettings } from './ui';
 import {
@@ -277,7 +278,22 @@ function DirectCallRows({
   devices: LinkedDevice[];
   preferences: AccountPreferences;
 }): React.ReactElement {
-  const [open, setOpen] = React.useState<string | null>(null);
+  // Until a row is tapped, this phone's row is open when it still has a step to
+  // pick, so a Call direct that needed one lands on it.
+  const [picked, setOpen] = React.useState<string | null | undefined>(undefined);
+  const self = usePresenceStore((s) => s.surfaceId);
+  const selfDevice = devices.find((d) => d.surfaceId === self);
+  const open =
+    picked !== undefined
+      ? picked
+      : selfDevice?.speechEngines &&
+          directCallSteps(
+            selfDevice.speechEngines,
+            preferences.deviceDirectCall[selfDevice.surfaceId],
+            preferences.voiceTones,
+          ).summary === 'Set up'
+        ? selfDevice.surfaceId
+        : null;
   return (
     <>
       {devices

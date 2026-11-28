@@ -8,6 +8,7 @@
 import {
   agentWorkingLabel,
   directCallSummary,
+  NOT_SET_UP,
   resolveDirectCall,
   type ResolvedDirectCall,
 } from '@patch/wire/direct-call';
@@ -24,6 +25,7 @@ import { api } from '../../api/rest.js';
 import { useChatStore } from '../../stores/chatStore.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
+import { useLayoutStore } from '../../stores/layoutStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { useVoiceStore } from '../../stores/voiceStore.js';
 import { isRunning } from '../../stores/types.js';
@@ -118,6 +120,14 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
     prefs.voiceTones,
   );
   if (!resolved.ok) {
+    // A step with nothing to run on is a pick to make, not a failure: open the
+    // place to make it, with this device's row open (DirectCallsGroup).
+    if (resolved.reason === NOT_SET_UP) {
+      useUiStore.getState().requestSettingsPage('voice');
+      useLayoutStore.getState().openTab({ kind: 'page', page: 'settings' });
+      useUiStore.getState().pushNotice('Pick a speech engine for direct calls on this device.');
+      return;
+    }
     useUiStore.getState().pushError(`Cannot call direct: ${resolved.reason}`);
     return;
   }

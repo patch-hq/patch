@@ -19,6 +19,7 @@ import {
 } from '@patch/wire/direct-call';
 import type { CatalogProvider } from '@patch/wire/audio';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
+import { usePresenceStore } from '../../stores/presenceStore.js';
 import { patchShared } from './sharedWrite.js';
 import { agoLabel } from './hostWrite.js';
 import { useDevices } from './DevicesPage.js';
@@ -250,8 +251,20 @@ export function DirectCallsGroup(): JSX.Element {
   const { devices } = useDevices();
   const setups = usePreferencesStore((s) => s.preferences.deviceDirectCall);
   const tones = usePreferencesStore((s) => s.preferences.voiceTones);
-  const [open, setOpen] = useState<string | null>(null);
+  // Until a row is clicked, this device's row is open when it still has a step
+  // to pick, so a Call direct that needed one lands on it.
+  const [picked, setOpen] = useState<string | null | undefined>(undefined);
+  const self = usePresenceStore((s) => s.surfaceId);
   const app = devices?.filter((d) => d.surfaceKind !== 'voice-device') ?? null;
+  const selfDevice = app?.find((d) => d.surfaceId === self);
+  const open =
+    picked !== undefined
+      ? picked
+      : selfDevice?.speechEngines &&
+          directCallSteps(selfDevice.speechEngines, setups[selfDevice.surfaceId], tones).summary ===
+            'Set up'
+        ? selfDevice.surfaceId
+        : null;
   return (
     <Group label="Direct calls" testid="settings-direct-calls">
       {app === null ? (

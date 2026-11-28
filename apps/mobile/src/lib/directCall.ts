@@ -7,10 +7,12 @@
 // interfaces the web and desktop implement.
 
 import { NativeModules, Platform } from 'react-native';
+import { router, type Href } from 'expo-router';
 import {
   cloudSpeechEnginesFromHosts,
   directCallSummary,
   mergeSpeechEngines,
+  NOT_SET_UP,
   resolveDirectCall,
   CLOUD_STT_ENGINES,
   CLOUD_TTS_ENGINES,
@@ -223,6 +225,8 @@ export interface DirectCallDeps {
   holdAudio?: (chatId: string) => Promise<void>;
   /** Hang the whole call up, service and all (voiceCall.ts `endVoiceCall`). */
   hangUp?: () => Promise<void>;
+  /** Open Settings → Voice calls when this phone has a step still to pick (tests stub it). */
+  openSetup?: () => void;
 }
 
 interface Spec {
@@ -301,6 +305,12 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
     prefs.voiceTones,
   );
   if (!resolved.ok) {
+    // A step with nothing to run on is a pick to make, not a failure: open the
+    // place to make it, with this phone's row open (DirectCallsSection).
+    if (resolved.reason === NOT_SET_UP) {
+      (deps.openSetup ?? (() => router.push('/settings/voice' as Href)))();
+      return;
+    }
     useUiStore.getState().pushError(`Cannot call direct: ${resolved.reason}`);
     return;
   }
