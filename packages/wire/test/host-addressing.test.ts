@@ -457,7 +457,7 @@ describe('the cross-chat listing names each chat’s host', () => {
       type: 'patch.list_chats.response',
       sourceChatId: 'c0',
       chatCount: 1,
-      chats: [{ chatId: 'c1', hostId: 'host-a' }],
+      chats: [{ chatId: 'c1', hostId: 'host-a', hidden: false, snoozed: false }],
     });
     expect(ok.success, JSON.stringify(ok.success ? {} : ok.error?.issues)).toBe(true);
     const res = PatchListChatsResponseEvent.safeParse({
