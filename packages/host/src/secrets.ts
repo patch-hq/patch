@@ -73,6 +73,11 @@ export class SecretsStore {
     return SecretsFile.parse(parsed);
   }
 
+  /** One secret's value, or undefined when it is not set. */
+  get(key: string): string | undefined {
+    return Object.hasOwn(this.secrets, key) ? this.secrets[key] : undefined;
+  }
+
   /** Current secrets, sorted by key for a stable published order. */
   list(): SecretEntry[] {
     return Object.keys(this.secrets)

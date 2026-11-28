@@ -98,6 +98,18 @@ Who the voice is told it is comes from the account's `managerVoicePrompt` (Setti
 
 Calls on any other chat are unchanged apart from the shared tools above.
 
+### Voice tools
+
+Beside its own tools, the voice agent has the tools of the MCP servers the user has added (Settings → MCP, the same list every chat's agent uses, `02-host.md` § What else a chat gets). The host is the MCP client, the same on Gemini, OpenAI and ElevenLabs: at the start of each call it connects to every server whose Voice switch is on, lists its tools, gives the voice each tool that is not turned off under its own name and schema (declared as `<server>__<tool>`, one shared definition turned into each provider's schema dialect), and runs the voice's calls through MCP; the result returns into the call as any tool's does. A server's tool that fails answers the voice with the failure. A server the host cannot reach is shown on the call bar and its tools are left out; the call carries on.
+
+Tools are on unless switched off. Only the turned-off tool names are stored, per server (`voiceOff`), so a tool a server adds later is simply on, one it removes disappears, and one it renames is a new tool. Nothing keeps a tool list: it is read at the start of each call and again before each tool runs, so a tool that went away or was turned off mid-call is refused, naming it. A server that says its tool list changed is read again for Settings; the declarations of a call already open do not change.
+
+Each group of tools has a Voice switch and an Agent switch (Settings → MCP): Patch's own groups (Chats, Timers, Tasks and calendar) and each MCP server. Voice off leaves a group's tools out of every call; Agent off is the server's `enabled`. Hand-off, look back, switch chat and end call are in no group and are always on. A server is a command the host starts or a remote Streamable HTTP address; a remote server's token is read from the host's Secrets entry its `tokenSecret` names, never stored with the server. A named secret that is not set fails the connection, naming it.
+
+There is no limit on tools. Settings shows how many the voice has, with a plain note that many tools can make it slower or pick the wrong one.
+
+Each tool the voice runs through MCP is written into the chat as a tool call in the one tool-call style (`14-design-web.md` § Tool calls): the same `mcp__<server>__<tool>` call and result an agent's own call makes.
+
 On Gemini the address rule (§ Session modes) is applied before the audio reaches the provider, because Gemini Live cannot transcribe an utterance without answering it: the host turns Gemini's own activity detection off, cuts the mic into utterances with its local VAD, and sends Gemini an utterance (`activityStart`, audio, `activityEnd`) only once it is addressed. An utterance inside the 30-second follow-up window, and every utterance in `call`, streams live; any other is held, transcribed on the host's own speech-to-text, and either released whole (addressed, so its first word is delayed by that transcription) or reported as heard-but-not-sent and never sent to Gemini. If the host cannot transcribe a held utterance it reports the failure rather than guessing. On OpenAI it is: the provider is told not to answer on its own in `hands-free`, each finished transcript is run through the address rule, an addressed one is answered, and an unaddressed one is reported as heard-but-not-sent and removed from the provider's conversation. Barge-in on a voice agent call comes from the provider's own VAD; in `hands-free` on OpenAI another voice in the room does not cut a reply off.
 
 ### Keeping voice and text as one conversation

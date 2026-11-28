@@ -22,7 +22,9 @@
 // host rejects the frame, and ends a call the moment its line goes quiet. It also
 // carries `patch.send_to`'s `localId` and asks for a sent message's reply with
 // `patch.reply.request` (spec/03 § Cross-chat tools), from 1.1.2190.
-export const MIN_SUPPORTED_HOST_VERSION = '1.1.2200';
+// 1.1.2231 is the first host whose `host.settings` carries MCP servers reached over HTTP
+// (`McpServerConfig` is a command or a URL) and the voice's tool switches (spec/07 § Voice tools).
+export const MIN_SUPPORTED_HOST_VERSION = '1.1.2231';
 
 export type HostSupport =
   | { supported: true }

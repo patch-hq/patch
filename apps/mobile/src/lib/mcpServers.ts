@@ -3,10 +3,10 @@
 // and back, validated against the wire's own McpServerList before anything is
 // sent (design/settings-redesign). Pure, so the screen and its tests share it.
 
-import { McpServerList, type McpServerConfig } from '@patch/wire';
+import { McpServerList, type McpServerConfig, type StdioMcpServerConfig } from '@patch/wire';
 
 /** `npx @playwright/mcp --headless` — the command and its args, as one line. */
-export function commandLine(s: Pick<McpServerConfig, 'command' | 'args'>): string {
+export function commandLine(s: Pick<StdioMcpServerConfig, 'command' | 'args'>): string {
   return [s.command, ...s.args].map(quoteArg).join(' ');
 }
 
@@ -79,10 +79,21 @@ export function parseEnvText(text: string): Record<string, string> {
   return Object.fromEntries(env);
 }
 
+/** Where a server is reached, as one line: its address, or its command line. */
+export function serverTarget(s: McpServerConfig): string {
+  return 'url' in s ? s.url : commandLine(s);
+}
+
 export interface McpDraft {
   name: string;
+  transport: 'command' | 'url';
   commandLine: string;
   envText: string;
+  url: string;
+  /** The name of the Secrets entry holding the token; empty for none. */
+  tokenSecret: string;
+  /** The tools turned off for the voice. */
+  voiceOff: string[];
 }
 
 /**
@@ -95,24 +106,34 @@ export function applyMcpDraft(
   original: string | null,
   draft: McpDraft,
 ): { ok: true; list: McpServerConfig[] } | { ok: false; message: string } {
-  let words: string[];
-  let env: Record<string, string>;
-  try {
-    words = splitCommandLine(draft.commandLine);
-    env = parseEnvText(draft.envText);
-  } catch (e) {
-    return { ok: false, message: (e as Error).message };
-  }
-  const [command, ...args] = words;
-  if (command === undefined) return { ok: false, message: 'A command is required' };
   const prev = original === null ? undefined : list.find((s) => s.name === original);
-  const entry: McpServerConfig = {
+  const base = {
     name: draft.name.trim(),
-    command,
-    args,
-    env,
     enabled: prev?.enabled ?? true,
+    voice: prev?.voice ?? true,
+    voiceOff: draft.voiceOff,
   };
+  let entry: McpServerConfig;
+  if (draft.transport === 'url') {
+    const secret = draft.tokenSecret.trim();
+    entry = {
+      ...base,
+      url: draft.url.trim(),
+      ...(secret !== '' ? { tokenSecret: secret } : {}),
+    };
+  } else {
+    let words: string[];
+    let env: Record<string, string>;
+    try {
+      words = splitCommandLine(draft.commandLine);
+      env = parseEnvText(draft.envText);
+    } catch (e) {
+      return { ok: false, message: (e as Error).message };
+    }
+    const [command, ...args] = words;
+    if (command === undefined) return { ok: false, message: 'A command is required' };
+    entry = { ...base, command, args, env };
+  }
   const next =
     original === null ? [...list, entry] : list.map((s) => (s.name === original ? entry : s));
   const parsed = McpServerList.safeParse(next);

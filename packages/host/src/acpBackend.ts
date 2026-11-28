@@ -766,7 +766,12 @@ export function acpMcpServers(
   for (const s of opts.extraMcpServers ?? []) {
     servers.push(
       'url' in s
-        ? { type: 'http', name: s.name, url: s.url, headers: [] }
+        ? {
+            type: 'http',
+            name: s.name,
+            url: s.url,
+            headers: Object.entries(s.headers ?? {}).map(([name, value]) => ({ name, value })),
+          }
         : { name: s.name, command: s.command, args: s.args, env: env(s.env) },
     );
   }

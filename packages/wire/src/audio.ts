@@ -825,6 +825,8 @@ export const AudioErrorCode = z.enum([
    * the call carries on.
    */
   'voice_tool_failed',
+  /** An MCP server's tools could not be read for this call; the call carries on without them. */
+  'voice_mcp_unavailable',
 ]);
 export type AudioErrorCode = z.infer<typeof AudioErrorCode>;
 
@@ -835,6 +837,7 @@ export type AudioErrorCode = z.infer<typeof AudioErrorCode>;
 export const AUDIO_NOTICE_CODES: ReadonlySet<AudioErrorCode> = new Set([
   'catch_up_failed',
   'voice_tool_failed',
+  'voice_mcp_unavailable',
 ]);
 
 export const AudioErrorEvent = z

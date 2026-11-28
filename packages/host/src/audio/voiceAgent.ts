@@ -101,15 +101,40 @@ export function relayPush(instruction: string, facts: string[], content: string)
   return [instruction.trim(), ...facts, content].join('\n\n');
 }
 
-/** One tool as every provider declares it: string parameters, described. */
+/** A JSON Schema object describing a tool's arguments, as the tool's own server gave it or as built here. */
+export type ToolSchema = Record<string, unknown>;
+
+/** One tool as every provider declares it: a name, what it does and its arguments' JSON Schema. */
 export interface VoiceToolSpec {
   name: string;
   description: string;
-  params: Record<string, string>;
-  required: string[];
+  schema: ToolSchema;
 }
 
-/** The tools every voice agent call is given; a Manager call adds its own (managerVoice.ts). */
+/** The schema of a tool whose arguments are all described strings. */
+export function stringParamsSchema(
+  params: Record<string, string>,
+  required: string[] = Object.keys(params),
+): ToolSchema {
+  return {
+    type: 'object',
+    properties: Object.fromEntries(
+      Object.entries(params).map(([k, d]) => [k, { type: 'string', description: d }]),
+    ),
+    required,
+  };
+}
+
+function stringTool(
+  name: string,
+  description: string,
+  params: Record<string, string>,
+  required?: string[],
+): VoiceToolSpec {
+  return { name, description, schema: stringParamsSchema(params, required) };
+}
+
+/** The built-in tools every voice agent call is given, before any group is turned off. */
 export function voiceAgentTools(opts: {
   handoff: VoiceHandoff;
   lookBack: boolean;
@@ -119,68 +144,57 @@ export function voiceAgentTools(opts: {
   // `never` has no agent behind the voice, so nothing to pass to or ask about.
   if (opts.handoff !== 'never') {
     tools.push(
-      {
-        name: PASS_TO_AGENT_TOOL_NAME,
-        description: PASS_TO_AGENT_DESCRIPTION,
-        params: {
+      stringTool(
+        PASS_TO_AGENT_TOOL_NAME,
+        PASS_TO_AGENT_DESCRIPTION,
+        {
           request:
             'What the user wants, in plain words, with anything the agent needs to know to do it.',
         },
-        required: ['request'],
-      },
-      {
-        name: CHECK_STATUS_TOOL_NAME,
-        description: CHECK_STATUS_DESCRIPTION,
-        params: {},
-        required: [],
-      },
+        ['request'],
+      ),
+      stringTool(CHECK_STATUS_TOOL_NAME, CHECK_STATUS_DESCRIPTION, {}, []),
     );
   }
   if (opts.lookBack) {
-    tools.push({
-      name: LOOK_BACK_TOOL_NAME,
-      description: LOOK_BACK_DESCRIPTION,
-      params: { query: 'A few key words to search the chat for.' },
-      required: ['query'],
-    });
+    tools.push(
+      stringTool(
+        LOOK_BACK_TOOL_NAME,
+        LOOK_BACK_DESCRIPTION,
+        { query: 'A few key words to search the chat for.' },
+        ['query'],
+      ),
+    );
   }
   // Every call can look at other chats, on any host (chatLookup.ts).
   tools.push(
-    {
-      name: FIND_CHATS_TOOL_NAME,
-      description: FIND_CHATS_DESCRIPTION,
-      params: { query: 'A few words of the chat name or folder; empty to list recent chats.' },
-      required: [],
-    },
-    {
-      name: CHAT_STATUS_TOOL_NAME,
-      description: CHAT_STATUS_DESCRIPTION,
-      params: { chat: "The chat's name (as the user said it, or from find_chats) or its id." },
-      required: ['chat'],
-    },
-  );
-  tools.push({
-    name: SEND_TO_CHAT_TOOL_NAME,
-    description: SEND_TO_CHAT_DESCRIPTION,
-    params: {
+    stringTool(
+      FIND_CHATS_TOOL_NAME,
+      FIND_CHATS_DESCRIPTION,
+      { query: 'A few words of the chat name or folder; empty to list recent chats.' },
+      [],
+    ),
+    stringTool(
+      CHAT_STATUS_TOOL_NAME,
+      CHAT_STATUS_DESCRIPTION,
+      { chat: "The chat's name (as the user said it, or from find_chats) or its id." },
+      ['chat'],
+    ),
+    stringTool(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_DESCRIPTION, {
       chat: "The chat's name (as the user said it, or from find_chats) or its id.",
       message: 'What to tell the chat, written as the user would put it to that chat.',
-    },
-    required: ['chat', 'message'],
-  });
-  tools.push({
-    name: END_CALL_TOOL_NAME,
-    description: END_CALL_DESCRIPTION,
-    params: {},
-    required: [],
-  });
+    }),
+    stringTool(END_CALL_TOOL_NAME, END_CALL_DESCRIPTION, {}, []),
+  );
   if (opts.switchChat) {
-    tools.push({
-      name: SWITCH_CHAT_TOOL_NAME,
-      description: SWITCH_CHAT_DESCRIPTION,
-      params: { chat: 'The chat to move to, as the user named it, or its id.' },
-      required: ['chat'],
-    });
+    tools.push(
+      stringTool(
+        SWITCH_CHAT_TOOL_NAME,
+        SWITCH_CHAT_DESCRIPTION,
+        { chat: 'The chat to move to, as the user named it, or its id.' },
+        ['chat'],
+      ),
+    );
   }
   return tools;
 }
@@ -244,6 +258,15 @@ export interface VoiceAgentLink {
   }): void;
   checkStatus(sessionId: string, chatId: string): string;
   lookBack(chatId: string, query: string): string;
+  /**
+   * Show a tool the voice is running through an MCP server in the chat, as any
+   * tool call is: returns what to call with its outcome. Throws when the chat
+   * cannot take it.
+   */
+  recordToolCall(
+    chatId: string,
+    req: { server: string; tool: string; args: Record<string, unknown> },
+  ): (outcome: { result: string; isError: boolean }) => void;
   /** Find chats of the account by a few words of name or folder (chatLookup.ts). */
   findChats(chatId: string, query: string): Promise<string>;
   /**

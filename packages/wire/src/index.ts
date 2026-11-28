@@ -173,6 +173,7 @@ export * from './branch-track.js';
 export * from './branch-points.js';
 // Provider keys a host holds, set from Settings → Hosts (spec/02 § Provider keys).
 export * from './provider-keys.js';
+export * from './voice-tool-groups.js';
 export * from './providers.js';
 export * from './acpAgents.js';
 export * from './modelEndpoints.js';

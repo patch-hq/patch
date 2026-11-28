@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
-import { McpApps, stdioConnector } from '../src/mcpApps.js';
+import { McpApps, mcpAppConnector } from '../src/mcpApps.js';
 
 const script = fileURLToPath(new URL('./fixtures/mcp-app-server.mjs', import.meta.url));
 const logger = pino({ level: 'silent' });
@@ -15,7 +15,7 @@ describe('McpApps with a real server', () => {
       logger,
       serversFor: () => [spec],
       folderOf: () => '/f',
-      connect: stdioConnector(logger),
+      connect: mcpAppConnector(logger, () => undefined),
     });
     const ask = async (op: 'resource' | 'call', tool: string, args?: Record<string, unknown>) => {
       const out: WireEvent[] = [];

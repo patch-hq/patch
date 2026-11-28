@@ -5,11 +5,16 @@
 
 import { EventEmitter } from 'node:events';
 import type { AudioServerOptions } from '../../src/audio/server.js';
-import { fakeVoiceAgentLink } from './fakeVoiceAgentLink.js';
+import { fakeVoiceAgentLink, emptyToolbox } from './fakeVoiceAgentLink.js';
 
 export function fakeVoiceAgent(): Pick<
   AudioServerOptions,
-  'geminiApiKey' | 'geminiWsCtor' | 'makeTimeline' | 'voiceAgentLink' | 'getVoiceInstructions'
+  | 'geminiApiKey'
+  | 'geminiWsCtor'
+  | 'makeTimeline'
+  | 'voiceAgentLink'
+  | 'voiceToolbox'
+  | 'getVoiceInstructions'
 > {
   return {
     geminiApiKey: 'g-key',
@@ -30,6 +35,7 @@ export function fakeVoiceAgent(): Pick<
       beginReply: () => ({ set() {}, finish() {} }),
     }),
     voiceAgentLink: fakeVoiceAgentLink().link,
+    voiceToolbox: emptyToolbox(),
     getVoiceInstructions: () => 'Be the voice of this chat.',
   };
 }

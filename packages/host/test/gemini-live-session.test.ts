@@ -16,7 +16,11 @@ import {
 import { MockVad } from '../src/audio/vad.js';
 import type { SessionInit } from '../src/audio/session.js';
 import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
-import { fakeVoiceAgentLink, FAKE_START_CONTEXT } from './helpers/fakeVoiceAgentLink.js';
+import {
+  fakeVoiceAgentLink,
+  FAKE_START_CONTEXT,
+  emptyToolbox,
+} from './helpers/fakeVoiceAgentLink.js';
 import { soundConfig, VOICE_AGENT_ENGINES, type AudioEvent } from '@patch/wire/audio';
 
 const logger = pino({ level: 'silent' });
@@ -112,6 +116,7 @@ function makeDeps(overrides: Partial<GeminiLiveDeps> = {}): {
     sendAudio: (ev) => audioEvents.push(ev),
     sendBinary: (pcm) => binaryFrames.push(pcm),
     link,
+    toolbox: emptyToolbox(),
     instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'test-key',
     wsCtor,

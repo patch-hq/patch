@@ -105,6 +105,21 @@ export interface ChatVoiceHost {
   recordCallNote(chatId: string, line: string): void;
   /** Record where a hand-off stands (`chat.voice_handoff`): every surface draws it on its row. */
   recordVoiceHandoff(handoff: VoiceHandoffRecord): void;
+  /** Show a tool the voice ran through an MCP server in the chat, as any tool call is. */
+  recordVoiceToolCall(req: {
+    chatId: string;
+    callId: string;
+    tool: string;
+    args: unknown;
+    startedAt: number;
+  }): void;
+  recordVoiceToolResult(req: {
+    chatId: string;
+    callId: string;
+    tool: string;
+    result: string;
+    isError: boolean;
+  }): void;
   /** The chat as it stands, for a start context (`START_RECENT_MESSAGES` in full). Throws for an unknown chat. */
   voiceStartFacts(chatId: string, recent: number): StartFacts;
   /** The chat agent's last message, from the chat's own record. */
@@ -486,6 +501,18 @@ export function createChatVoice(deps: {
       return daemon.searchChat(chatId, query);
     },
 
+    recordToolCall(chatId, req) {
+      const callId = `voice-tool-${randomUUID()}`;
+      const tool = `mcp__${req.server}__${req.tool}`;
+      daemon.recordVoiceToolCall({
+        chatId,
+        callId,
+        tool,
+        args: req.args,
+        startedAt: Date.now(),
+      });
+      return (outcome) => daemon.recordVoiceToolResult({ chatId, callId, tool, ...outcome });
+    },
     findChats(chatId, query) {
       return deps.lookup.findChats(query, chatId);
     },

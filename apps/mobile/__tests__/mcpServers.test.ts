@@ -18,6 +18,8 @@ const playwright: McpServerConfig = {
   args: ['@playwright/mcp', '--headless'],
   env: {},
   enabled: true,
+  voice: false,
+  voiceOff: [],
 };
 const devtools: McpServerConfig = {
   name: 'chrome-devtools',
@@ -25,6 +27,8 @@ const devtools: McpServerConfig = {
   args: ['chrome-devtools-mcp'],
   env: { DEBUG: '1' },
   enabled: false,
+  voice: false,
+  voiceOff: [],
 };
 
 describe('command lines', () => {
@@ -84,6 +88,10 @@ describe('applyMcpDraft', () => {
       name: ' devtools ',
       commandLine: 'npx chrome-devtools-mcp --headless',
       envText: 'DEBUG=1',
+      transport: 'command',
+      url: '',
+      tokenSecret: '',
+      voiceOff: [],
     });
     expect(r).toEqual({
       ok: true,
@@ -95,6 +103,8 @@ describe('applyMcpDraft', () => {
           args: ['chrome-devtools-mcp', '--headless'],
           env: { DEBUG: '1' },
           enabled: true,
+          voice: true,
+          voiceOff: [],
         },
       ],
     });
@@ -105,15 +115,34 @@ describe('applyMcpDraft', () => {
       name: 'devtools',
       commandLine: 'npx other',
       envText: '',
+      transport: 'command',
+      url: '',
+      tokenSecret: '',
+      voiceOff: [],
     });
     expect(r.ok && r.list).toEqual([
       playwright,
-      { name: 'devtools', command: 'npx', args: ['other'], env: {}, enabled: false },
+      {
+        name: 'devtools',
+        command: 'npx',
+        args: ['other'],
+        env: {},
+        enabled: false,
+        voice: false,
+        voiceOff: [],
+      },
     ]);
   });
 
   it('refuses what the wire schema refuses, in words', () => {
-    const draft = { commandLine: 'npx x', envText: '' };
+    const draft = {
+      commandLine: 'npx x',
+      envText: '',
+      transport: 'command' as const,
+      url: '',
+      tokenSecret: '',
+      voiceOff: [],
+    };
     expect(applyMcpDraft([playwright], null, { ...draft, name: 'playwright' })).toEqual({
       ok: false,
       message: 'MCP server names must be unique',
@@ -148,5 +177,32 @@ describe('applyMcpDraft', () => {
 describe('parseEnvText prototype names', () => {
   it('accepts a key named like an Object.prototype member', () => {
     expect(parseEnvText('constructor=1\ntoString=x')).toEqual({ constructor: '1', toString: 'x' });
+  });
+});
+
+describe('applyMcpDraft: a remote server', () => {
+  it('is reached by address, its token named by a secret and kept out of the list', () => {
+    const r = applyMcpDraft([], null, {
+      name: 'home',
+      transport: 'url',
+      commandLine: '',
+      envText: '',
+      url: ' http://ha.local:8123/api/mcp ',
+      tokenSecret: 'HA_TOKEN',
+      voiceOff: ['TurnOff'],
+    });
+    expect(r).toEqual({
+      ok: true,
+      list: [
+        {
+          name: 'home',
+          url: 'http://ha.local:8123/api/mcp',
+          tokenSecret: 'HA_TOKEN',
+          enabled: true,
+          voice: true,
+          voiceOff: ['TurnOff'],
+        },
+      ],
+    });
   });
 });

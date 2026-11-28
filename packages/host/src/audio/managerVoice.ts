@@ -22,6 +22,8 @@ import {
   CHAT_STATUS_TOOL_NAME,
   FIND_CHATS_TOOL_NAME,
   SEND_TO_CHAT_TOOL_NAME,
+  stringParamsSchema,
+  type VoiceToolSpec,
 } from './voiceAgent.js';
 import { ChatLookupError, LIST_LIMIT, words, type ChatLookup } from './chatLookup.js';
 
@@ -33,12 +35,7 @@ const READ_LIMIT = 25;
  * `ask_agent` is the hand-off for real work: it passes the request to the
  * Manager chat's own agent and returns straight away.
  */
-export interface ManagerQuickTool {
-  name: string;
-  description: string;
-  params: Record<string, string>;
-  required: string[];
-}
+export type ManagerQuickTool = VoiceToolSpec;
 
 export const ADD_TASK_TOOL_NAME = 'add_task';
 export const COMPLETE_TASK_TOOL_NAME = 'complete_task';
@@ -58,67 +55,76 @@ export const MANAGER_QUICK_TOOLS: readonly ManagerQuickTool[] = [
     description:
       "Add a task to the user's to-do list (Todoist). Answers at once. Use it for anything like " +
       '"log a task", "remind me to", "add to my list".',
-    params: {
-      content: 'The task, as a short phrase.',
-      due: 'When it is due, in plain words ("tomorrow", "friday", "2026-12-01"); empty for none.',
-      project: 'The list it belongs on ("Groceries"), as the user said it; empty for the Inbox.',
-    },
-    required: ['content'],
+    schema: stringParamsSchema(
+      {
+        content: 'The task, as a short phrase.',
+        due: 'When it is due, in plain words ("tomorrow", "friday", "2026-12-01"); empty for none.',
+        project: 'The list it belongs on ("Groceries"), as the user said it; empty for the Inbox.',
+      },
+      ['content'],
+    ),
   },
   {
     name: COMPLETE_TASK_TOOL_NAME,
     description:
       "Tick off a task in the user's to-do list (Todoist) by a few words of its text. Answers at " +
       'once. If several tasks match it says so: ask the user which.',
-    params: {
-      task: 'A few words of the task text.',
-      project: 'The list it is on, as the user said it; empty to look in every list.',
-    },
-    required: ['task'],
+    schema: stringParamsSchema(
+      {
+        task: 'A few words of the task text.',
+        project: 'The list it is on, as the user said it; empty to look in every list.',
+      },
+      ['task'],
+    ),
   },
   {
     name: REMOVE_TASK_TOOL_NAME,
     description:
       "Delete a task from the user's to-do list (Todoist) by a few words of its text, when the " +
       'user asks to remove it. A finished task is complete_task instead. Answers at once.',
-    params: {
-      task: 'A few words of the task text.',
-      project: 'The list it is on, as the user said it; empty to look in every list.',
-    },
-    required: ['task'],
+    schema: stringParamsSchema(
+      {
+        task: 'A few words of the task text.',
+        project: 'The list it is on, as the user said it; empty to look in every list.',
+      },
+      ['task'],
+    ),
   },
   {
     name: READ_PROJECT_TOOL_NAME,
     description:
       "Read out the open tasks on one of the user's to-do lists (Todoist), such as Groceries. " +
       'Answers at once.',
-    params: { project: 'The list name, as the user said it.' },
-    required: ['project'],
+    schema: stringParamsSchema({ project: 'The list name, as the user said it.' }, ['project']),
   },
   {
     name: CALENDAR_AGENDA_TOOL_NAME,
     description:
       "Read the user's calendar for a day or a range. Answers at once with each event's title and " +
       'time. Dates are YYYY-MM-DD; with no dates it is today.',
-    params: {
-      from: 'First day, YYYY-MM-DD; empty for today.',
-      to: 'Last day, YYYY-MM-DD; empty for the same day as from.',
-      query: 'A few words to search event titles for; empty for all.',
-    },
-    required: [],
+    schema: stringParamsSchema(
+      {
+        from: 'First day, YYYY-MM-DD; empty for today.',
+        to: 'Last day, YYYY-MM-DD; empty for the same day as from.',
+        query: 'A few words to search event titles for; empty for all.',
+      },
+      [],
+    ),
   },
   {
     name: ADD_EVENT_TOOL_NAME,
     description:
       "Put an event in the user's calendar. Answers at once. Times are London local, ISO " +
       '(2026-12-01T14:00:00); for an all-day event pass a plain date as start and set all_day.',
-    params: {
-      title: 'The event title.',
-      start: 'Start, ISO datetime or a date for all-day.',
-      end: 'End, ISO datetime; required unless the event is all day.',
-      all_day: 'The word "true" for an all-day event, otherwise empty.',
-    },
-    required: ['title', 'start'],
+    schema: stringParamsSchema(
+      {
+        title: 'The event title.',
+        start: 'Start, ISO datetime or a date for all-day.',
+        end: 'End, ISO datetime; required unless the event is all day.',
+        all_day: 'The word "true" for an all-day event, otherwise empty.',
+      },
+      ['title', 'start'],
+    ),
   },
   {
     name: SET_TIMER_TOOL_NAME,
@@ -126,40 +132,45 @@ export const MANAGER_QUICK_TOOLS: readonly ManagerQuickTool[] = [
       'Start a timer ("ten minutes") or set an alarm ("for 7am"). Patch keeps it and rings it ' +
       'when it is done, even after this conversation ends. Give seconds for a timer, or at for ' +
       'an alarm. Never use it to ask how a timer is going: that is list_timers.',
-    params: {
-      seconds: 'How long, in whole seconds (ten minutes is 600); empty for an alarm.',
-      at: 'For an alarm: the time, London local, ISO (2026-12-01T07:00:00); empty for a timer.',
-      label: 'What it is for ("pasta"); empty if the user did not say.',
-    },
-    required: [],
+    schema: stringParamsSchema(
+      {
+        seconds: 'How long, in whole seconds (ten minutes is 600); empty for an alarm.',
+        at: 'For an alarm: the time, London local, ISO (2026-12-01T07:00:00); empty for a timer.',
+        label: 'What it is for ("pasta"); empty if the user did not say.',
+      },
+      [],
+    ),
   },
   {
     name: LIST_TIMERS_TOOL_NAME,
     description:
       'Read the timers and alarms that are set and how long each has left. Answers at once. ' +
       'Use it for "how are my timers", "how long is left", "what timers do I have". It sets nothing.',
-    params: {},
-    required: [],
+    schema: stringParamsSchema({}, []),
   },
   {
     name: CANCEL_TIMER_TOOL_NAME,
     description:
       'Cancel a timer or alarm, or stop one that is ringing. Say which by its label or id; ' +
       'empty when there is only one.',
-    params: { timer: "The timer's label or id; empty when there is only one." },
-    required: [],
+    schema: stringParamsSchema(
+      { timer: "The timer's label or id; empty when there is only one." },
+      [],
+    ),
   },
   {
     name: CHANGE_TIMER_TOOL_NAME,
     description:
       'Change a running timer: add or take off time, or set a new time left. Give add_seconds ' +
       'or set_seconds.',
-    params: {
-      timer: "The timer's label or id; empty when there is only one.",
-      add_seconds: 'Seconds to add; negative to take off ("two more minutes" is 120).',
-      set_seconds: 'Make it this many seconds from now, replacing the time left.',
-    },
-    required: [],
+    schema: stringParamsSchema(
+      {
+        timer: "The timer's label or id; empty when there is only one.",
+        add_seconds: 'Seconds to add; negative to take off ("two more minutes" is 120).',
+        set_seconds: 'Make it this many seconds from now, replacing the time left.',
+      },
+      [],
+    ),
   },
   {
     name: ASK_AGENT_TOOL_NAME,
@@ -167,8 +178,10 @@ export const MANAGER_QUICK_TOOLS: readonly ManagerQuickTool[] = [
       "Hand real work to the Manager's own agent: research, changes to code or files, anything that " +
       'needs more than a lookup or the tools above. Returns at once to say it was passed on; the ' +
       'result is written in the Manager chat, not read out here.',
-    params: { request: 'What the agent should do, in plain language, with the detail it needs.' },
-    required: ['request'],
+    schema: stringParamsSchema(
+      { request: 'What the agent should do, in plain language, with the detail it needs.' },
+      ['request'],
+    ),
   },
 ];
 

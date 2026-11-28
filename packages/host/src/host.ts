@@ -22,6 +22,8 @@ import type {
   HostComponent,
   HostProviderKey,
   McpServerConfig,
+  McpServerTools,
+  VoiceToolGroup,
 } from '@patch/wire';
 import type { SdkPermissionMode } from './chatState.js';
 import type { LinkDrop } from './linkDropCause.js';
@@ -135,6 +137,10 @@ export interface HostDescriptionInput {
   harnessMcpServers: McpServerConfig[];
   /** Whether Patch's own tools server is wired into chats (Settings → MCP). Absent = host predates it. */
   patchMcpEnabled?: boolean | undefined;
+  /** Patch's own voice tool groups switched off for the voice (Settings → MCP). */
+  voiceToolGroupsOff: VoiceToolGroup[];
+  /** The tools each MCP server offered when last read, by server name. */
+  mcpTools: Record<string, McpServerTools>;
   /** Always true now: the shipped Manager/Speakers CLAUDE.md always loads. */
   harnessClaudeMdEnabled: boolean;
   /** Why this host's server link last dropped (`host.host.lastDisconnect`). */
@@ -219,6 +225,8 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     harnessBrowserToolsEnabled: input.harnessBrowserToolsEnabled,
     harnessMcpServers: input.harnessMcpServers,
     ...(input.patchMcpEnabled !== undefined ? { patchMcpEnabled: input.patchMcpEnabled } : {}),
+    voiceToolGroupsOff: input.voiceToolGroupsOff,
+    mcpTools: input.mcpTools,
     harnessClaudeMdEnabled: input.harnessClaudeMdEnabled,
     ...(input.lastDisconnect !== undefined ? { lastDisconnect: input.lastDisconnect } : {}),
     // Present, even empty, says this host runs Claude on Amazon Bedrock accounts.

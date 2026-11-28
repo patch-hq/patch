@@ -3,12 +3,24 @@
 
 import { vi } from 'vitest';
 import { DEFAULT_SHARED_SETTINGS, relayFrom, type VoiceRelayInstructions } from '@patch/wire';
+import pino from 'pino';
+import { VoiceToolbox } from '../../src/audio/voiceTools.js';
 import type {
   SendToChatOutcome,
   StartContext,
   SwitchOutcome,
   VoiceAgentLink,
 } from '../../src/audio/voiceAgent.js';
+
+/** A toolbox with no MCP servers and no Patch tool group turned off. */
+export function emptyToolbox(): VoiceToolbox {
+  return new VoiceToolbox({
+    logger: pino({ level: 'silent' }),
+    servers: () => [],
+    groupsOff: () => [],
+    secrets: () => undefined,
+  });
+}
 
 export const FAKE_START_CONTEXT =
   'THE CHAT AS IT STANDS\nChat: Train times\nUser: what time is my train';
@@ -61,6 +73,7 @@ export function fakeVoiceAgentLink(
           return { ok: true, name: 'Garden planning', reply: new Promise<string>(() => {}) };
         }),
     ),
+    recordToolCall: vi.fn(() => () => undefined),
     answerPermission: vi.fn((chatId: string, words: string) => {
       calls.push(`permission:${chatId}:${words}`);
       return false;

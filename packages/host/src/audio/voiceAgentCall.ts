@@ -38,7 +38,12 @@ import {
   relayPush,
   type StartContext,
   type VoiceAgentLink,
+  type VoiceToolSpec,
+  voiceAgentTools,
 } from './voiceAgent.js';
+import { voiceToolGroupOf } from '@patch/wire';
+import type { VoiceHandoff } from '@patch/wire/audio';
+import type { McpVoiceSet, VoiceToolbox } from './voiceTools.js';
 
 /** What a provider session does for its call. */
 export interface VoiceAgentEngine {
@@ -60,6 +65,8 @@ export interface VoiceAgentCallOptions {
   source: VoiceTurnSource;
   logger: Logger;
   sendAudio: (ev: AudioEvent) => void;
+  /** The MCP servers' tools and the groups of Patch's own that are off, read for each call. */
+  toolbox: VoiceToolbox;
   /** The call answers an agent's ring: why it rang (spec/07 § Agent-initiated voice). */
   callReason?: string;
 }
@@ -93,10 +100,49 @@ export class VoiceAgentCall {
   private readonly pushes: Push[] = [];
   /** Hand-offs passed on whose answer has not been pushed yet. */
   private open = 0;
+  /** The MCP servers' tools this call was given, read when it began. */
+  private mcp: McpVoiceSet | undefined;
 
   constructor(opts: VoiceAgentCallOptions) {
     this.opts = opts;
     this.chat = opts.chatId;
+  }
+
+  /**
+   * Read the MCP servers' tools for this call, once, before the provider declares
+   * its tools. A server that cannot be reached is shown on the call bar and its
+   * tools are left out.
+   */
+  async loadTools(): Promise<void> {
+    this.mcp = await this.opts.toolbox.open();
+    for (const problem of this.mcp.problems) {
+      this.opts.sendAudio({
+        type: 'audio.error',
+        code: 'voice_mcp_unavailable',
+        message: problem,
+        sessionId: this.opts.sessionId,
+      });
+    }
+  }
+
+  /**
+   * Every tool the voice is given, the same on every provider: Patch's own
+   * (minus the groups turned off for the voice), the Manager's quick tools when
+   * it is a Manager call, then the MCP servers'. {@link loadTools} has run.
+   */
+  tools(opts: {
+    handoff: VoiceHandoff;
+    lookBack: boolean;
+    switchChat: boolean;
+    quick?: readonly VoiceToolSpec[];
+  }): VoiceToolSpec[] {
+    if (!this.mcp) throw new Error('voice call: tools declared before they were loaded');
+    const off = new Set(this.opts.toolbox.groupsOff());
+    const own = [...(opts.quick ?? []), ...voiceAgentTools(opts)].filter((t) => {
+      const group = voiceToolGroupOf(t.name);
+      return group === undefined || !off.has(group);
+    });
+    return [...own, ...this.mcp.specs];
   }
 
   /** The chat the call is on now. */
@@ -213,7 +259,8 @@ export class VoiceAgentCall {
       name === CHAT_STATUS_TOOL_NAME ||
       name === SEND_TO_CHAT_TOOL_NAME ||
       name === SWITCH_CHAT_TOOL_NAME ||
-      name === END_CALL_TOOL_NAME
+      name === END_CALL_TOOL_NAME ||
+      this.mcp?.resolve(name) !== undefined
     );
   }
 
@@ -268,8 +315,19 @@ export class VoiceAgentCall {
           await this.untilGoodbyeHeard();
           link.endCall(sessionId);
           return 'The call has ended.';
-        default:
-          throw new Error(`there is no tool called ${name} on this call`);
+        default: {
+          const mcp = this.mcp?.resolve(name);
+          if (!mcp) throw new Error(`there is no tool called ${name} on this call`);
+          const done = link.recordToolCall(this.chat, { ...mcp, args });
+          try {
+            const result = await this.opts.toolbox.call(mcp.server, mcp.tool, args);
+            done({ result, isError: false });
+            return result;
+          } catch (err) {
+            done({ result: (err as Error).message, isError: true });
+            throw err;
+          }
+        }
       }
     } catch (err) {
       const reason = (err as Error).message;

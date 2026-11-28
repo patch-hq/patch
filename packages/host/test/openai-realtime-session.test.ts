@@ -12,7 +12,11 @@ import {
 } from '../src/audio/openai-realtime.js';
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
-import { fakeVoiceAgentLink, FAKE_START_CONTEXT } from './helpers/fakeVoiceAgentLink.js';
+import {
+  fakeVoiceAgentLink,
+  FAKE_START_CONTEXT,
+  emptyToolbox,
+} from './helpers/fakeVoiceAgentLink.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { AudioEvent } from '@patch/wire/audio';
 import { FakeTimeline } from './gemini-live-session.test.js';
@@ -82,6 +86,7 @@ function makeDeps(overrides: Partial<OpenAIRealtimeDeps> = {}): {
     sendAudio: (ev) => events.push(ev),
     sendBinary: (pcm) => binary.push(pcm),
     link,
+    toolbox: emptyToolbox(),
     instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'o-key',
     model: 'gpt-realtime-2.1-mini',
@@ -902,6 +907,7 @@ describe('a voice device session', () => {
     const passed: Array<{ request: string }> = [];
     const { deps, last } = deviceDeps([TOM], {
       link: fakeVoiceAgentLink({ passToAgent: (req) => passed.push(req) }).link,
+      toolbox: emptyToolbox(),
     });
     const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
     const ws = await open(session, last);
