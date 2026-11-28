@@ -63,6 +63,20 @@ class MessageLog {
   }
 }
 
+/** The close a socket saw: its code and reason. */
+function waitCloseFrame(
+  ws: WebSocket,
+  timeoutMs = 3000,
+): Promise<{ code: number; reason: string }> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout waiting for close')), timeoutMs);
+    ws.once('close', (code: number, reason: Buffer) => {
+      clearTimeout(timer);
+      resolve({ code, reason: reason.toString('utf8') });
+    });
+  });
+}
+
 function waitClose(ws: WebSocket, timeoutMs = 3000): Promise<number> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout waiting for close')), timeoutMs);
@@ -209,6 +223,25 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
     expect(Buffer.compare(down.data, pcm)).toBe(0);
 
     client.close();
+  });
+
+  it("the host ending the call (ended_by_agent) reaches the surface as that, and the surface's close reaches the host as its own", async () => {
+    for (const [from, code, reason] of [
+      ['host', 1000, 'ended_by_agent'],
+      ['surface', 4000, 'paused'],
+    ] as const) {
+      const { audioUrl } = await mintToken();
+      const upstreamConnected = new Promise<WebSocket>((resolve) => {
+        fakeUpstream.once('connection', (ws) => resolve(ws));
+      });
+      const client = new WebSocket(`${serverUrl}${audioUrl}`);
+      await waitOpen(client);
+      const upstream = await upstreamConnected;
+      const far = from === 'host' ? client : upstream;
+      const closed = waitCloseFrame(far);
+      (from === 'host' ? upstream : client).close(code, reason);
+      expect(await closed).toEqual({ code, reason });
+    }
   });
 
   it('queues a frame sent before the upstream leg finishes connecting, and still delivers it in order', async () => {
@@ -513,7 +546,7 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     const client = new WebSocket(`${serverUrl}${audioUrl}`);
     await waitOpen(client);
     await waitFor(() => hostLink.sent.find((s) => s.event.type === 'patch.audio_relay.open'));
-    client.close();
+    client.close(1000, 'paused');
     const closeFrame = await waitFor(() =>
       hostLink.sent.find(
         (s) =>
@@ -522,14 +555,41 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
       ),
     );
     expect(closeFrame.hostId).toBe(HOST_ID);
+    expect(closeFrame.event).toMatchObject({ code: 1000, reason: 'paused' });
   });
 
-  it("a patch.audio_relay.close FROM the host closes the surface's own socket", async () => {
+  it("a patch.audio_relay.close FROM the host closes the surface's own socket the way the host's closed", async () => {
     const { sessionId, audioUrl } = await mintToken();
     const client = new WebSocket(`${serverUrl}${audioUrl}`);
-    const closePromise = waitClose(client);
+    const closePromise = waitCloseFrame(client);
     await waitOpen(client);
-    hostLink.emit({ type: 'patch.audio_relay.close', sessionId } as unknown as WireEvent, HOST_ID);
-    await closePromise;
+    hostLink.emit(
+      {
+        type: 'patch.audio_relay.close',
+        sessionId,
+        code: 1000,
+        reason: 'ended_by_agent',
+      } as unknown as WireEvent,
+      HOST_ID,
+    );
+    // The surface sees the agent's hang-up as an end, not a dropped line.
+    expect(await closePromise).toEqual({ code: 1000, reason: 'ended_by_agent' });
+  });
+
+  it("a host close whose code can only be reported (1006) closes the surface's socket bare", async () => {
+    const { sessionId, audioUrl } = await mintToken();
+    const client = new WebSocket(`${serverUrl}${audioUrl}`);
+    const closePromise = waitCloseFrame(client);
+    await waitOpen(client);
+    hostLink.emit(
+      {
+        type: 'patch.audio_relay.close',
+        sessionId,
+        code: 1006,
+        reason: '',
+      } as unknown as WireEvent,
+      HOST_ID,
+    );
+    expect((await closePromise).code).toBe(1005);
   });
 });

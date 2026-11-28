@@ -1634,6 +1634,8 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'patch.audio_relay.close': {
     type: 'patch.audio_relay.close',
     sessionId: 'sess-1',
+    code: 1000,
+    reason: 'ended_by_agent',
   },
   'patch.audio_relay.error': {
     type: 'patch.audio_relay.error',

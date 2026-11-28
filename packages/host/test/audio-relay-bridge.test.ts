@@ -24,9 +24,14 @@ const silent = pino({ level: 'silent' });
  */
 class MessageLog {
   private readonly received: Array<{ data: Buffer; isBinary: boolean }> = [];
-  constructor(private readonly ws: WsSocket) {
+  /** How the bridge closed this connection, once it has. */
+  closed: { code: number; reason: string } | null = null;
+  constructor(readonly ws: WsSocket) {
     ws.on('message', (data: Buffer, isBinary: boolean) => {
       this.received.push({ data, isBinary });
+    });
+    ws.on('close', (code: number, reason: Buffer) => {
+      this.closed = { code, reason: reason.toString('utf8') };
     });
   }
   send(data: Buffer): void {
@@ -171,7 +176,7 @@ describe('AudioRelayBridge', () => {
     bridge.dispose();
   });
 
-  it('close tears down the local socket and forgets the session', async () => {
+  it("close tears down the local socket with the surface's own code and reason, and forgets the session", async () => {
     const started = await startLocalAudioServer();
     wss = started.wss;
     const bridge = new AudioRelayBridge({
@@ -182,9 +187,36 @@ describe('AudioRelayBridge', () => {
     bridge.handleOpen({ type: 'patch.audio_relay.open', sessionId: 'sess-close' });
     await waitForCount(started.connections, 1);
     expect(bridge.hasSession('sess-close')).toBe(true);
-    bridge.handleClose({ type: 'patch.audio_relay.close', sessionId: 'sess-close' });
+    bridge.handleClose({
+      type: 'patch.audio_relay.close',
+      sessionId: 'sess-close',
+      code: 4000,
+      reason: 'surface hung up',
+    });
     await new Promise((r) => setTimeout(r, 50));
     expect(bridge.hasSession('sess-close')).toBe(false);
+    expect(started.connections[0]!.closed).toEqual({ code: 4000, reason: 'surface hung up' });
+  });
+
+  it('the audio server ending the call (ended_by_agent) reaches the server as that, not a bare close', async () => {
+    const started = await startLocalAudioServer();
+    wss = started.wss;
+    const sent: AudioRelayBridgeOutbound[] = [];
+    const bridge = new AudioRelayBridge({
+      logger: silent,
+      localAudioUrl: `ws://127.0.0.1:${started.port}`,
+      sender: (e) => sent.push(e),
+    });
+    bridge.handleOpen({ type: 'patch.audio_relay.open', sessionId: 'sess-end' });
+    await waitForCount(started.connections, 1);
+    started.connections[0]!.ws.close(1000, 'ended_by_agent');
+    const close = await waitUntil(sent, (e) => e.type === 'patch.audio_relay.close');
+    expect(close).toEqual({
+      type: 'patch.audio_relay.close',
+      sessionId: 'sess-end',
+      code: 1000,
+      reason: 'ended_by_agent',
+    });
   });
 
   it('reports connect_failed (NO FALLBACK) when the local audio WSS refuses the connection', async () => {

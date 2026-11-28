@@ -439,13 +439,13 @@ discipline as the direct-dial path's own queue-until-open); `frame` and
 the server turns it into the surface-facing `audio.error {code:
 'host_unreachable'}` — NO FALLBACK to any other pipeline.
 
-| Type                      | Payload                                                                                         |
-| ------------------------- | ----------------------------------------------------------------------------------------------- |
-| `patch.audio_relay.open`  | `{sessionId}` — server asks the host to bridge this session to its own local audio WSS          |
-| `patch.audio_relay.ready` | `{sessionId}` — the host's local bridge socket is open (informational)                          |
-| `patch.audio_relay.frame` | `{sessionId, data, binary}` — one inner WS frame's bytes, base64, in either direction           |
-| `patch.audio_relay.close` | `{sessionId}` — either side ending the bridge cleanly                                           |
-| `patch.audio_relay.error` | `{sessionId, code, message}` — `code` is `connect_failed` (the host's own local connect failed) |
+| Type                      | Payload                                                                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `patch.audio_relay.open`  | `{sessionId}` — server asks the host to bridge this session to its own local audio WSS                                                                                                      |
+| `patch.audio_relay.ready` | `{sessionId}` — the host's local bridge socket is open (informational)                                                                                                                      |
+| `patch.audio_relay.frame` | `{sessionId, data, binary}` — one inner WS frame's bytes, base64, in either direction                                                                                                       |
+| `patch.audio_relay.close` | `{sessionId, code, reason}` — either side ending the bridge, with its own socket's close code and reason, which the other side closes with (an `ended_by_agent` or `transferred` stays one) |
+| `patch.audio_relay.error` | `{sessionId, code, message}` — `code` is `connect_failed` (the host's own local connect failed)                                                                                             |
 
 ### Artifacts (host ↔ server)
 

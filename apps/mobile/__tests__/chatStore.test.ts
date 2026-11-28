@@ -1096,6 +1096,20 @@ describe('mobile chatStore', () => {
       expect(useChatStore.getState().chats['c1']!.preview).toBe('turn the lights on');
     });
 
+    it("the voice agent's spoken reply shows without its [voice • …] tag, marked spoken", () => {
+      useChatStore.getState().applyEvent({
+        type: 'chat.message',
+        chatId: 'c1',
+        seq: 2,
+        role: 'assistant',
+        content: '[voice • mobile] The lights are on.',
+      });
+      const e = useChatStore.getState().timelines['c1']![0]!;
+      expect(e.content).toBe('The lights are on.');
+      expect(e.voice).toBe(true);
+      expect(useChatStore.getState().chats['c1']!.preview).toBe('The lights are on.');
+    });
+
     it('chat.message from a USER with no voice tag leaves content untouched, voice unset', () => {
       useChatStore.getState().applyEvent({
         type: 'chat.message',

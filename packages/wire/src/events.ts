@@ -8706,14 +8706,38 @@ export const PatchAudioRelayFrameEvent = z
   .strict();
 export type PatchAudioRelayFrameEvent = z.infer<typeof PatchAudioRelayFrameEvent>;
 
-/** Either side ending the bridge cleanly. */
+/**
+ * Either side ending the bridge, with the close its own socket saw: the code
+ * and reason travel across, so the far end closes the same way. A close the
+ * host means as an end (`ended_by_agent`, `transferred`) reaches the device as
+ * that, never as a bare close the device would take for a dropped line.
+ */
 export const PatchAudioRelayCloseEvent = z
   .object({
     type: z.literal('patch.audio_relay.close'),
     sessionId: z.string().min(1),
+    code: z.number().int(),
+    reason: z.string(),
   })
   .strict();
 export type PatchAudioRelayCloseEvent = z.infer<typeof PatchAudioRelayCloseEvent>;
+
+/**
+ * Close a relayed socket the way its far end closed: with the same code and
+ * reason, or bare when the far end's code is one a close frame can only
+ * report, never send (1005 no status, 1006 abnormal, 1015 TLS).
+ */
+export function closeAsRelayed(
+  socket: { close(code?: number, reason?: string): void },
+  code: number,
+  reason: string,
+): void {
+  const sendable =
+    (code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) ||
+    (code >= 3000 && code <= 4999);
+  if (sendable) socket.close(code, reason);
+  else socket.close();
+}
 
 /**
  * NO FALLBACK: the host's local bridge connection failed (its own audio WSS
