@@ -43,6 +43,33 @@ class SmartTurnFeaturesTest {
   }
 
   @Test
+  fun theFftGivesThePlainDft() {
+    var seed = 7L
+    val frames =
+      listOf(
+        DoubleArray(400) { i -> sin((2 * PI * 37 * i) / 400) },
+        DoubleArray(400) {
+          seed = (seed * 16807) % 2147483647
+          (seed / 2147483647.0) * 2 - 1
+        },
+        DoubleArray(400) { i -> if (i == 0) 1.0 else 0.0 },
+      )
+    for (frame in frames) {
+      val got = DoubleArray(201)
+      SmartTurnFeatures.powerSpectrum(frame, got)
+      for (k in 0 until 201) {
+        var re = 0.0
+        var im = 0.0
+        for (t in 0 until 400) {
+          re += frame[t] * kotlin.math.cos((2 * PI * k * t) / 400)
+          im -= frame[t] * sin((2 * PI * k * t) / 400)
+        }
+        assertEquals(re * re + im * im, got[k], 1e-6)
+      }
+    }
+  }
+
+  @Test
   fun keepsTheLastEightSecondsPaddingAShortClipAtTheFront() {
     val short = ShortArray(16000) { 1000 }
     val padded = SmartTurnFeatures.lastEightSeconds(short)
