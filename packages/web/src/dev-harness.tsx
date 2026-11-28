@@ -83,6 +83,13 @@ import { installDevErrorQueue } from './lib/devErrorQueue.js';
 import { initWindowChrome } from './lib/windowChrome.js';
 import './index.css';
 
+// The real app renders the call sounds at start (main.tsx) and a call cue throws
+// if they were not. A call seeded with `?voice=` plays its first cue as soon as
+// the bar mounts, so the harness renders them before anything else runs.
+await warmCallSounds().catch((e: unknown) =>
+  console.error(`call sounds could not be warmed: ${String(e)}`),
+);
+
 // Install the dev error queue collectors at harness boot — before any
 // component renders so we capture errors from the very first render.
 installDevErrorQueue();
@@ -4395,12 +4402,6 @@ function Harness(): JSX.Element {
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root missing');
-// The real app renders the call sounds at start (main.tsx) and a call cue throws
-// if they were not. A call seeded with `?voice=` plays its first cue as soon as
-// the bar mounts, so the harness waits for them before it renders.
-await warmCallSounds().catch((e: unknown) =>
-  console.error(`call sounds could not be warmed: ${String(e)}`),
-);
 
 createRoot(root).render(
   <StrictMode>
