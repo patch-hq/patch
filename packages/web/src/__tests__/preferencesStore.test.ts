@@ -10,6 +10,9 @@ vi.mock('../api/rest.js', () => ({
   api: { settings: () => settings(), setPreferences: (p: unknown) => setPreferences(p) },
 }));
 
+// The shared setup already pulled the real store in (via the voice-readiness
+// imports); drop it so the store under test is built against the mocked api.
+vi.resetModules();
 const { usePreferencesStore, DEFAULT_PREFERENCES } = await import('../stores/preferencesStore.js');
 
 const shared = (version: number, addressWord: string): SharedState =>
