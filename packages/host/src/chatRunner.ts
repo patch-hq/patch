@@ -71,6 +71,7 @@ import {
   DEFAULT_LIMIT_BEHAVIOUR,
   isOutboxEvent,
   isAnthropicApiKey,
+  parseAcpModel,
   type LimitBehaviour,
   type ReminderEvery,
 } from '@patch/wire';
@@ -6480,9 +6481,15 @@ export class Daemon {
       state.sessionAccountId = undefined;
     }
     this.opts.metaStore.update(chatId, (m) => {
-      const { sessionId: _session, sessionAccountId: _account, ...rest } = m;
+      const {
+        sessionId: _session,
+        sessionAccountId: _account,
+        managerPromptNoted: _noted,
+        ...rest
+      } = m;
       void _session;
       void _account;
+      void _noted;
       return { ...rest, updatedAt: this.opts.now() };
     });
     // A chat restored from disk is otherwise held to resuming; with nothing to
@@ -6598,11 +6605,13 @@ export class Daemon {
         sessionId: _session,
         sessionAccountId: _account,
         sessionCarried: _carried,
+        managerPromptNoted: _noted,
         ...rest
       } = m;
       void _session;
       void _account;
       void _carried;
+      void _noted;
       return {
         ...rest,
         ...(carried > 0 ? { sessionCarried: carried } : {}),
@@ -11157,6 +11166,9 @@ export class Daemon {
       );
     }
     const targetHarness = this.harnessOf(chatId);
+    if (chatId === SPECIAL_THREAD_IDS.manager && targetHarness === 'acp') {
+      this.noteManagerPromptNotApplied(chatId, state.model);
+    }
     // A session made by another provider cannot be resumed here: a chat whose
     // model was switched in place before linked chats (or a special thread
     // that has just changed provider) starts a fresh session. Patch never
@@ -13271,8 +13283,11 @@ export class Daemon {
         const sessionFromSeq =
           userMessageSeq ?? Math.max(0, this.chatLog.recordedHighWater(chatId));
         this.opts.metaStore.update(chatId, (m) => ({
-          // A session the provider moved to on its own was handed nothing.
-          ...(previous !== undefined ? { ...m, sessionCarried: undefined } : m),
+          // A session the provider moved to on its own was handed nothing, and
+          // has not been told what it is missing.
+          ...(previous !== undefined
+            ? { ...m, sessionCarried: undefined, managerPromptNoted: undefined }
+            : m),
           sessionId: env.sessionId,
           sessionFromSeq,
           sessionStartedAt: this.opts.now(),
@@ -16886,6 +16901,28 @@ export class Daemon {
     const queued = this.turnQueues.get(chatId)?.length ?? 0;
     const starting = this.chatLog.currentTurnId(chatId) === undefined ? 1 : 0;
     return queued + starting;
+  }
+
+  /**
+   * An ACP agent takes no system prompt, so the Manager prompt does not reach
+   * it (spec/06 § Manager prompt and folder). Said in the Manager's thread
+   * once per session, not on every turn: the flag is cleared whenever the
+   * session is.
+   */
+  private noteManagerPromptNotApplied(chatId: string, model: string | undefined): void {
+    if (this.managerPrompt === undefined || this.managerPrompt.trim() === '') return;
+    const meta = this.opts.metaStore.read(chatId);
+    if (!meta || meta.managerPromptNoted === true) return;
+    this.opts.metaStore.update(chatId, (m) => ({ ...m, managerPromptNoted: true }));
+    const agent = parseAcpModel(model)?.agentId ?? model ?? 'the agent';
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: `Manager prompt not applied · ${agent} takes no system prompt`,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+    });
   }
 
   /**
