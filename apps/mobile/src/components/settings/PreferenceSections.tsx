@@ -16,9 +16,9 @@
 
 import React from 'react';
 import { SetupLine } from './SetupLine';
-import { Alert, Text, View } from 'react-native';
+import { Alert, View } from 'react-native';
 import { api, type AccountPreferences } from '../../api/rest';
-import { space, typography, useTheme } from '../../lib/theme';
+import { space, useTheme } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
 import {
@@ -548,7 +548,6 @@ function VoiceUsage(): React.ReactElement | null {
 
 /** Who transcribes a meeting; the paid engines are chosen deliberately. */
 function MeetingEngineRow(): React.ReactElement {
-  const colors = useTheme();
   const [busy, setBusy] = React.useState(false);
   const hosts = usePresenceStore((s) => s.hosts);
   const hostReports = Object.values(hosts).flatMap((h) =>
@@ -595,7 +594,6 @@ function MeetingEngineRow(): React.ReactElement {
  * Whisper tidies up a live engine's words as dictation goes on.
  */
 function DictationEngines(): React.ReactElement {
-  const colors = useTheme();
   const [busy, setBusy] = React.useState(false);
   const hosts = usePresenceStore((s) => s.hosts);
   const hostReports = Object.values(hosts).flatMap((h) =>
