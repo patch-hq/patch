@@ -198,7 +198,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_send_to',
     {
       description:
-        "Agent-to-agent. Deliver a message as a user-turn into another existing chat — on ANY registered host, not just this one — the recipient's agent processes it as if the human sent it. Pass an idempotent localId if you want retries to dedupe.",
+        "Agent-to-agent. Deliver a message as a user-turn into another existing chat — on ANY registered host, not just this one — the recipient's agent processes it as if the human sent it. Pass an idempotent localId if you want retries to dedupe. If the target chat is archived the call is refused and nothing is sent: archiving is deliberate and a message would restart the chat, so ask the user first and only then resend with confirmArchived: true.",
       inputSchema: {
         chatId: z.string().min(1).describe(CHAT_ID_PARAM),
         message: z.string().min(1),
@@ -209,6 +209,10 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
             'Tag prepended to the delivered turn to mark it as spoken input. Leave unset for ordinary text.',
           ),
         localId: z.string().min(1).max(128).optional(),
+        confirmArchived: z
+          .boolean()
+          .optional()
+          .describe('Set only after the user has agreed to wake an archived target chat.'),
         goal: z
           .string()
           .min(1)
@@ -218,8 +222,9 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           ),
       },
     },
-    async ({ chatId, message, voicePrefix, localId, goal }) => {
+    async ({ chatId, message, voicePrefix, localId, goal, confirmArchived }) => {
       const body: Record<string, unknown> = { chatId, message, callerChatId };
+      if (confirmArchived !== undefined) body['confirmArchived'] = confirmArchived;
       if (goal !== undefined) body['goal'] = goal;
       if (voicePrefix !== undefined) body['voicePrefix'] = voicePrefix;
       if (localId !== undefined) body['localId'] = localId;

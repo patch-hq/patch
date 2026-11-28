@@ -243,12 +243,13 @@ export function registerChatsCommands(program: Command): void {
     .command('send-to <id> [message]')
     .description('Deliver a user-turn into a chat on any host')
     .option('--message <message>', 'Message body (alternative to positional)')
+    .option('--confirm-archived', 'The user agreed to wake the target chat although it is archived')
     .option('--json', 'JSON output')
     .action(
       async (
         rawId: string,
         positional: string | undefined,
-        opts: CommonOpts & { message?: string },
+        opts: CommonOpts & { message?: string; confirmArchived?: boolean },
       ) => {
         await run(opts, async () => {
           const message = positional ?? opts.message;
@@ -263,6 +264,7 @@ export function registerChatsCommands(program: Command): void {
               chatId: id,
               message,
               callerChatId: caller,
+              ...(opts.confirmArchived ? { confirmArchived: true } : {}),
             });
             if (opts.json) emitJson(res);
             else emitText('queued');
