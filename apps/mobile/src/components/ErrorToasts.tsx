@@ -71,7 +71,49 @@ export function ErrorToasts(): React.ReactElement | null {
       }}
     >
       {errors.map((e) =>
-        e.snooze ? (
+        e.invitation ? (
+          <View
+            key={e.id}
+            testID={`invitation-toast-${e.id}`}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.md,
+              backgroundColor: colors.paperRaised,
+              borderColor: colors.divider,
+              borderWidth: 1,
+              borderRadius: radii.md,
+              paddingHorizontal: space.md,
+              paddingVertical: space.sm,
+            }}
+          >
+            <Text style={{ flex: 1, color: colors.ink, fontFamily: fonts.body }}>{e.message}</Text>
+            {e.invitation.action === null ? null : (
+              <Pressable
+                testID="invitation-toast-action"
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={() => {
+                  e.invitation?.action?.run();
+                  dismiss(e.id);
+                }}
+              >
+                <Text style={{ color: colors.leaf, fontFamily: fonts.bodyMedium }}>
+                  {e.invitation.action.label}
+                </Text>
+              </Pressable>
+            )}
+            <Pressable
+              testID="invitation-toast-dismiss"
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss"
+              hitSlop={10}
+              onPress={() => dismiss(e.id)}
+            >
+              <Text style={{ color: colors.ink2, fontFamily: fonts.body }}>Dismiss</Text>
+            </Pressable>
+          </View>
+        ) : e.snooze ? (
           <View
             key={e.id}
             testID={`snooze-toast-${e.id}`}

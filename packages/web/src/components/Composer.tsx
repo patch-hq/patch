@@ -88,7 +88,7 @@ import {
   SPECIAL_THREAD_IDS,
   accountServesModel,
 } from '@patch/wire';
-import { voiceKeyHostStatus } from '@patch/wire/audio';
+import { voiceGap } from '../lib/voiceReadiness.js';
 import { hostOutage } from '../lib/usage.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import {
@@ -576,20 +576,13 @@ export const Composer = forwardRef(function Composer(
   // an engine whose key this chat's host lacks is refused at the host, so
   // the mic greys out and says why. Unknown (host not reported) is not blocked.
   const computerDictationEngine = usePreferencesStore((s) => ownDictationEngine(s.preferences));
-  const chatHostPresence = usePresenceStore((s) => (hostId ? s.hosts[hostId] : undefined));
   const dictationBlockedReason =
     computerDictationEngine === 'local'
       ? getDesktopBridge()?.localStt
         ? null
         : LOCAL_ENGINE_DESKTOP_ONLY
-      : chatHostPresence?.host
-        ? voiceKeyHostStatus(computerDictationEngine, [
-            {
-              hostName: chatHostPresence.host.hostName,
-              voiceKeys: chatHostPresence.host.voiceKeys,
-            },
-          ])
-        : null;
+      : (voiceGap({ feature: 'dictation', engine: computerDictationEngine }, hostId ?? undefined)
+          ?.message ?? null);
   // A missing Claude credential is NOT like daemon-offline. Daemon-offline queues
   // the text and delivers it on reconnect, so sending stays enabled; with no
   // credential the turn can never run, so accepting the message would be a lie.

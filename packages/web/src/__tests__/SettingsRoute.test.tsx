@@ -782,14 +782,14 @@ describe('Settings → Dictation and Voice', () => {
       renderSettings('/settings/dictation');
       await waitFor(() => expect(screen.getByTestId('dictation-mob-7-keys')).toBeInTheDocument());
       expect(screen.getByTestId('dictation-mob-7-keys')).toHaveTextContent(
-        'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
+        'Needs a Deepgram key on hetzner.',
       );
       // Whisper on this browser needs no key.
       expect(screen.queryByTestId('dictation-web-dev-1-keys')).toBeNull();
       fireEvent.click(screen.getByTestId('settings-nav-voice'));
       await waitFor(() => expect(screen.getByTestId('voice-keys')).toBeInTheDocument());
       expect(screen.getByTestId('voice-keys')).toHaveTextContent(
-        'Not configured on hetzner, mac: no OpenAI key is set. Sessions there are refused.',
+        'Needs an OpenAI key on hetzner, mac.',
       );
     });
 
@@ -901,7 +901,7 @@ describe('Settings → Dictation and Voice', () => {
     expect((server.writes[0]!.voiceConfig as Record<string, unknown>).meeting).toBe('assemblyai');
     await waitFor(() =>
       expect(screen.getByTestId('meeting-engine-keys')).toHaveTextContent(
-        'Not configured on hetzner: no AssemblyAI key is set.',
+        'Needs an AssemblyAI key on hetzner.',
       ),
     );
   });

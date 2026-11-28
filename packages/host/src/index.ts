@@ -387,8 +387,11 @@ import { clipHasSpeech } from './meetingSpeechGate.js';
 import {
   DEFAULT_VOICE_AGENT,
   DEFAULT_VOICE_CONFIG,
-  voiceKeyMissingMessage,
-  voiceSurfacesMissingKey,
+  hostGaps,
+  keyMissingGap,
+  refusalMessage,
+  type VoiceHostFacts,
+  type VoiceSetup,
   dictationEngineFor,
   type DictationEngine,
   type VoiceAgentSetting,
@@ -1013,7 +1016,51 @@ async function startHost(
     deepgram: providerKeys.has('deepgram'),
     assemblyai: providerKeys.has('assemblyai'),
   });
-  logVoiceKeysMissing(logger, voiceConfig, voiceAgent, voiceKeys());
+  // The on-device speech engines this host has installed, reported with the
+  // keys (`host.host.voiceLocal`): everything a surface needs to tell, before
+  // the user starts a voice feature, whether this host can run it.
+  const voiceLocal = (): VoiceHostFacts['localEngines'] => {
+    const mock = config.audio.whisperBackend === 'mock';
+    const kokoroInstalled =
+      components.describe().find((c) => c.id === 'kokoro')?.state === 'installed';
+    const whisperInstalled =
+      components.describe().find((c) => c.id === 'whisper')?.state === 'installed' &&
+      existsSync(join(config.patchHome, 'components', 'whisper', 'model.bin'));
+    const dir = config.audio.parakeetModelDir;
+    return {
+      whisper: mock || whisperInstalled,
+      parakeet: mock || (dir !== undefined && existsSync(dir)),
+      // Installing Kokoro turns it on unless KOKORO_BACKEND says otherwise.
+      kokoro:
+        process.env['KOKORO_BACKEND'] === undefined
+          ? kokoroInstalled
+          : config.audio.kokoroBackend !== 'off',
+    };
+  };
+  const voiceHostFacts = (): VoiceHostFacts => {
+    const keys = voiceKeys();
+    // WHISPER_BACKEND=mock is the test host: its one canned reader stands in
+    // for every speech-to-text engine, so none of them needs its key.
+    const mock = config.audio.whisperBackend === 'mock';
+    return {
+      hostName,
+      voiceKeys: mock ? { ...keys, groq: true, elevenlabs: true } : keys,
+      localEngines: voiceLocal(),
+    };
+  };
+  const voiceSetup = (): VoiceSetup => ({
+    config: voiceConfig,
+    agent: voiceAgent,
+    ttsBackend,
+  });
+  const logVoiceGaps = (): void => {
+    for (const { feature, gap } of hostGaps(voiceSetup(), voiceHostFacts())) {
+      logger.error(
+        { feature: feature.feature, need: gap.need },
+        `voice: ${refusalMessage(gap)} Its sessions will be refused.`,
+      );
+    }
+  };
   // spec/07 § The voice agent — each provider's models and voices, read with
   // this host's key for Settings → Voice calls; again on a key change and on
   // Refresh (`host.voice_catalog_refresh`). Its reads finish asynchronously,
@@ -1613,6 +1660,7 @@ async function startHost(
       ...(elevenLabsVoices !== undefined ? { elevenLabsVoices } : {}),
       ...(elevenLabsVoicesError !== undefined ? { elevenLabsVoicesError } : {}),
       voiceKeys: voiceKeys(),
+      voiceLocal: voiceLocal(),
       voiceCatalog: voiceCatalog.snapshot(),
       voiceUsage: {
         ...voiceLedger.totals(Date.now()),
@@ -1859,7 +1907,7 @@ async function startHost(
   // The voice agent catalog's first read; again on a key change below.
   void voiceCatalog.refreshAll();
   providerKeys.onChange(() => {
-    logVoiceKeysMissing(logger, voiceConfig, voiceAgent, voiceKeys());
+    logVoiceGaps();
     publishHost();
     void voiceCatalog.refreshAll();
     refreshElevenLabsVoices();
@@ -1928,6 +1976,8 @@ async function startHost(
       });
     },
   });
+  // Boot: say now what this host cannot run (needs the components above).
+  logVoiceGaps();
 
   // Whether the server link is authed (used by RemoteJobsStore to gate RPC).
   let linkOnline = false;
@@ -2464,7 +2514,7 @@ async function startHost(
     if (JSON.stringify(shared.voiceConfig) !== JSON.stringify(voiceConfig)) {
       voiceConfig = shared.voiceConfig;
       logger.info({ voiceConfig }, 'voice config changed');
-      logVoiceKeysMissing(logger, voiceConfig, voiceAgent, voiceKeys());
+      logVoiceGaps();
     }
     if (shared.kokoroVoice !== undefined && shared.kokoroVoice !== kokoroVoice) {
       kokoroVoice = shared.kokoroVoice;
@@ -2490,7 +2540,7 @@ async function startHost(
     if (JSON.stringify(shared.voiceAgent) !== JSON.stringify(voiceAgent)) {
       voiceAgent = shared.voiceAgent;
       logger.info({ voiceAgent }, 'voice agent setup changed');
-      logVoiceKeysMissing(logger, voiceConfig, voiceAgent, voiceKeys());
+      logVoiceGaps();
     }
     voiceTones = shared.voiceTones;
     if (JSON.stringify(shared.deviceDictation) !== JSON.stringify(deviceDictation)) {
@@ -6055,7 +6105,11 @@ async function startHost(
               : providerKeys.has('assemblyai')
                 ? assemblyaiMeeting
                 : undefined;
-        if (!hosted) throw new Error(voiceKeyMissingMessage('meeting', engine));
+        if (!hosted) {
+          throw new Error(
+            refusalMessage(keyMissingGap({ feature: 'meeting', engine }, engine, hostName)),
+          );
+        }
         const startedAt = Date.now();
         const runs = await hosted.transcribeDiarised(wav);
         const audioSeconds = Math.max(0, wav.length - 44) / 32000;
@@ -6921,90 +6975,56 @@ async function startHost(
     build: (engine) => {
       // WHISPER_BACKEND=mock is the test host: its one canned reader stands in
       // for whichever engine the account picked, so no engine needs a key or model.
-      if (config.audio.whisperBackend === 'mock' && whisper !== undefined) return { whisper };
+      if (config.audio.whisperBackend === 'mock' && whisper !== undefined) return whisper;
       if (engine === 'groq') {
-        if (providerKeys.get('groq') === undefined) {
-          return {
-            unavailable: 'no Groq key is set on this host (add it in Settings → Providers)',
-          };
-        }
-        return {
-          whisper:
-            whisper instanceof GroqWhisperBackend
-              ? whisper
-              : own('groq', () =>
-                  createWhisper({
-                    backend: 'groq',
-                    logger: whisperLog,
-                    groqApiKey: () => providerKeys.get('groq'),
-                  }),
-                ),
-        };
+        return whisper instanceof GroqWhisperBackend
+          ? whisper
+          : own('groq', () =>
+              createWhisper({
+                backend: 'groq',
+                logger: whisperLog,
+                groqApiKey: () => providerKeys.get('groq'),
+              }),
+            );
       }
       if (engine === 'elevenlabs') {
-        if (providerKeys.get('elevenlabs') === undefined) {
-          return {
-            unavailable: 'no ElevenLabs key is set on this host (add it in Settings → Providers)',
-          };
-        }
-        return {
-          whisper:
-            whisper instanceof ElevenLabsScribeBackend
-              ? whisper
-              : own(
-                  'elevenlabs',
-                  () =>
-                    new ElevenLabsScribeBackend({
-                      logger: whisperLog,
-                      apiKey: () => providerKeys.get('elevenlabs'),
-                    }),
-                ),
-        };
+        return whisper instanceof ElevenLabsScribeBackend
+          ? whisper
+          : own(
+              'elevenlabs',
+              () =>
+                new ElevenLabsScribeBackend({
+                  logger: whisperLog,
+                  apiKey: () => providerKeys.get('elevenlabs'),
+                }),
+            );
       }
       if (engine === 'parakeet') {
         const dir = config.audio.parakeetModelDir;
-        if (dir === undefined || !existsSync(dir)) {
-          return {
-            unavailable: 'the Parakeet model is not installed on this host (PARAKEET_MODEL_DIR)',
-          };
-        }
-        return {
-          whisper:
-            whisper instanceof ParakeetWhisperBackend
-              ? whisper
-              : own('parakeet', () =>
-                  createWhisper({ backend: 'parakeet', logger: whisperLog, parakeetModelDir: dir }),
-                ),
-        };
+        if (dir === undefined) throw new Error('Parakeet is not installed on this host');
+        return whisper instanceof ParakeetWhisperBackend
+          ? whisper
+          : own('parakeet', () =>
+              createWhisper({ backend: 'parakeet', logger: whisperLog, parakeetModelDir: dir }),
+            );
       }
       // engine === 'whisper'
-      if (whisper instanceof LocalWhisperBackend) return { whisper };
+      if (whisper instanceof LocalWhisperBackend) return whisper;
       const modelDir = join(config.patchHome, 'components', 'whisper');
-      const installed =
-        components.describe().find((c) => c.id === 'whisper')?.state === 'installed' &&
-        existsSync(join(modelDir, 'model.bin'));
-      if (!installed) {
-        return {
-          unavailable:
-            'the Whisper model is not installed on this host (Settings → Hosts → Components)',
-        };
-      }
       const sidecarDir = process.env['WHISPER_SIDECAR_CWD'] ?? bundledSidecarDir('whisper');
-      return {
-        whisper: own('whisper', () =>
-          createWhisper({
-            backend: 'local',
-            logger: whisperLog,
-            localModelPath: modelDir,
-            localSidecarCwd: sidecarDir,
-            localSidecarEnv: {
-              UV_PROJECT_ENVIRONMENT: components.runtimeDir('whisper'),
-              PYTHONPATH: join(sidecarDir, 'src'),
-            },
-            uvPath: uvCandidates(config.patchHome).find((p) => existsSync(p)) ?? 'uv',
-          }),
-        ),
-      };
+      return own('whisper', () =>
+        createWhisper({
+          backend: 'local',
+          logger: whisperLog,
+          localModelPath: modelDir,
+          localSidecarCwd: sidecarDir,
+          localSidecarEnv: {
+            UV_PROJECT_ENVIRONMENT: components.runtimeDir('whisper'),
+            PYTHONPATH: join(sidecarDir, 'src'),
+          },
+          uvPath: uvCandidates(config.patchHome).find((p) => existsSync(p)) ?? 'uv',
+        }),
+      );
     },
   });
   // The on-host model loads now: a broken install aborts the boot rather
@@ -7310,6 +7330,8 @@ async function startHost(
     // spec/07 § Voice — live read, same pattern as getKokoroVoice above.
     getVoiceConfig: () => voiceConfig,
     resolveSpeechToText: sttEngineResolver,
+    voiceFacts: voiceHostFacts,
+    getTtsBackend: () => ttsBackend,
     getVoiceAgent: () => voiceAgent,
     getVoiceTones: () => voiceTones,
     getVoiceCatalog: (provider) => voiceCatalog.entry(provider),
@@ -7919,25 +7941,6 @@ export function handleAttachmentDelete(
       ok: false,
       error: { code, message: (err as Error).message },
     });
-  }
-}
-
-/**
- * One error line per voice surface configured onto a backend whose key this
- * host does not hold. Logged, never thrown: the host keeps serving every
- * chat, and the surface itself is refused per session with the same sentence.
- */
-export function logVoiceKeysMissing(
-  logger: Logger,
-  config: VoiceConfig,
-  agent: VoiceAgentSetting,
-  keys: VoiceKeys,
-): void {
-  for (const { surface, backend, env } of voiceSurfacesMissingKey(config, agent, keys)) {
-    logger.error(
-      { surface, backend, missingKey: env },
-      `voice: ${voiceKeyMissingMessage(surface, backend)} Its sessions will be refused.`,
-    );
   }
 }
 

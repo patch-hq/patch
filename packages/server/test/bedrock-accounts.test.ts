@@ -31,6 +31,8 @@ type ProfileAnswer = { exists: boolean; signedIn: boolean | null; error?: string
 const hostInfo = (hostId: string, awsProfiles?: AwsProfileInfo[]): WireEvent =>
   ({
     type: 'host.host',
+    voiceKeys: { gemini: false, openai: false, groq: false },
+    voiceLocal: { whisper: false, parakeet: false, kokoro: false },
     voiceCatalog: {},
     hostId,
     hostName: hostId,

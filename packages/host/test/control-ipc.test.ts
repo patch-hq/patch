@@ -3860,6 +3860,8 @@ describe('GET /internal/jobs — plain success path', () => {
 describe('host-scoped control endpoints (spec/02 § Control IPC)', () => {
   const hostReport = {
     type: 'host.host' as const,
+    voiceKeys: { gemini: false, openai: false, groq: false },
+    voiceLocal: { whisper: false, parakeet: false, kokoro: false },
     voiceCatalog: {},
     hostId: 'host-a',
     hostName: 'host-a',

@@ -9,6 +9,7 @@ import { Alert, Pressable, Text } from 'react-native';
 import { Bell, Volume2 } from 'lucide-react-native';
 import { useSettingsStore } from '../stores/settingsStore';
 import { radii, space, typography, useTheme } from '../lib/theme';
+import { ensureVoiceReady } from '../lib/voiceReadiness';
 
 export function ReachSwitch(): React.ReactElement {
   const colors = useTheme();
@@ -27,6 +28,8 @@ export function ReachSwitch(): React.ReactElement {
       accessibilityLabel={label}
       accessibilityState={{ checked: auto, disabled }}
       onPress={() => {
+        // Spoken alerts are checked the moment they are asked for, not when the first one plays.
+        if (!auto && !ensureVoiceReady({ feature: 'spoken-alert' })) return;
         setBusy(true);
         useSettingsStore
           .getState()

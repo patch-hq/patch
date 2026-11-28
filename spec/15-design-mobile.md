@@ -308,6 +308,10 @@ Snoozing a chat (the row sheet's or the chat ⋯ menu's Snooze chat) or a projec
 
 See `07-voice-app.md` for mechanics.
 
+## Voice readiness
+
+Voice features are checked when the user engages with them (`07-voice-app.md` § Readiness): the Notify / Auto-notify switch, a call or hands-free start, the composer mic and a provider or engine choice in Settings. A gap is a calm neutral notice at the top of the screen with a **Set up** action that opens the Settings page that fixes it, and a Dismiss; it is never the red error toast and never "failed, try again". The feature does not start and a switch stays off. Microphone and notification permission keep their own ask-when-needed explainer (§ Permissions on first use). A Settings row whose choice a host cannot run carries the same sentence with a Set up link, and the line clears when the host reports what was missing.
+
 ## Voice tab (Manager)
 
 Tapping the Voice tab opens the Manager thread directly. Inside: full chat-detail rendering (the Manager thread is just a chat) — the composer mic records a voice note to Manager, and the top-bar phone icon starts a Manager voice call.

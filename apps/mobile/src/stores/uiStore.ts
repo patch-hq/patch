@@ -48,6 +48,11 @@ export interface UiError {
    * message in bold, an optional second line and Undo. Absent on every error.
    */
   snooze?: { subline: string | null; undo: () => void };
+  /**
+   * A calm invitation to set something up (spec/07 § Readiness): the message
+   * and a named control that opens the fix. Drawn neutral, not as an error.
+   */
+  invitation?: { action: { label: string; run: () => void } | null };
 }
 
 interface UiState {
@@ -90,6 +95,8 @@ interface UiState {
   setTaskAddChatId(chatId: string | null): void;
   setCodexSignInHost(hostId: string | null): void;
   pushError(msg: string): void;
+  /** A missing-setup invitation with its one-step fix. */
+  pushInvitation(msg: string, action?: { label: string; run: () => void }): void;
   /** The toast after a snooze: bold title, an optional second line, and Undo. */
   pushSnoozeToast(title: string, subline: string | null, undo: () => void): void;
   dismissError(id: number): void;
@@ -140,6 +147,16 @@ export const useUiStore = create<UiState>((set, get) => ({
     }
     const id = ++_id;
     set({ errors: [...get().errors, { id, message: msg, at: Date.now() }] });
+  },
+  pushInvitation(msg, action) {
+    if (get().errors.some((e) => e.message === msg)) return;
+    const id = ++_id;
+    set({
+      errors: [
+        ...get().errors,
+        { id, message: msg, at: Date.now(), invitation: { action: action ?? null } },
+      ],
+    });
   },
   pushSnoozeToast(title, subline, undo) {
     const id = ++_id;

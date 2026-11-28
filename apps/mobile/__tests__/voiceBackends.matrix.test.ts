@@ -22,7 +22,8 @@ import { useSettingsStore } from '../src/stores/settingsStore';
 import {
   DEFAULT_VOICE_AGENT,
   DEFAULT_VOICE_CONFIG,
-  voiceKeyMissingMessage,
+  keyMissingGap,
+  refusalMessage,
   type AudioSessionMode,
   type VoiceAgentProvider,
   type VoiceConfig,
@@ -190,7 +191,9 @@ for (const mode of ['call', 'hands-free'] as const) {
           it('no key for it on the host: the call bar says exactly which key and where to switch', async () => {
             seedConfig(DEFAULT_VOICE_CONFIG, backend);
             const sock = await openCall('c1', mode);
-            const message = voiceKeyMissingMessage(mode, backend);
+            const message = refusalMessage(
+              keyMissingGap({ feature: 'call', surface: mode }, backend, 'this host'),
+            );
             sock.emitMessage(
               JSON.stringify({ type: 'audio.error', code: 'voice_key_missing', message }),
             );
@@ -283,7 +286,9 @@ describe('dictation on each phone engine', () => {
       ...DEFAULT_VOICE_CONFIG,
       dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
     });
-    const message = voiceKeyMissingMessage('dictation', 'deepgram');
+    const message = refusalMessage(
+      keyMissingGap({ feature: 'dictation', engine: 'deepgram' }, 'deepgram', 'this host'),
+    );
     const { startDictation, __resetDictationAudio } = await import('../src/lib/dictation');
     __resetDictationAudio();
     const onError = vi.fn();

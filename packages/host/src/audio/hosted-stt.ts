@@ -13,7 +13,10 @@
 // quietly transcribing with Whisper instead.
 
 import type { Logger } from 'pino';
-import { voiceKeyMissingMessage, type DictationEngine } from '@patch/wire/audio';
+import { keyMissingGap, refusalMessage, type DictationEngine } from '@patch/wire/audio';
+
+const keyRefusal = (engine: 'deepgram' | 'elevenlabs'): string =>
+  refusalMessage(keyMissingGap({ feature: 'dictation', engine }, engine, 'this host'));
 import { pcm16ToWav, type WhisperBackend } from './whisper.js';
 import { readKey, type KeySource } from './keySource.js';
 import { ElevenLabsScribeBackend } from './elevenlabs-stt.js';
@@ -139,7 +142,7 @@ export function pickDictationTranscriber(
     return {
       ok: false,
       backend: 'elevenlabs',
-      message: voiceKeyMissingMessage('dictation', 'elevenlabs'),
+      message: keyRefusal('elevenlabs'),
     };
   }
   if (engine !== 'deepgram') return { ok: true, whisper: transcribers.local };
@@ -148,7 +151,7 @@ export function pickDictationTranscriber(
   return {
     ok: false,
     backend: 'deepgram',
-    message: voiceKeyMissingMessage('dictation', 'deepgram'),
+    message: keyRefusal('deepgram'),
   };
 }
 

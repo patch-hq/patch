@@ -32,7 +32,7 @@ import { useVoiceStore, type VoiceNoteMode } from '../stores/voiceStore';
 import { useUiStore } from '../stores/uiStore';
 import { useChatStore } from '../stores/chatStore';
 import { ensurePermission } from './permissionGate';
-import { voiceKeyRefusal } from './voiceKeys';
+import { ensureDictationReady } from './voiceReadiness';
 import { startMicCapture, stopMicCapture } from './voiceMic';
 import { startDictationPreview, type DictationPreview } from './dictationPreview';
 
@@ -88,12 +88,7 @@ let _cancelWhileTaking = false;
 export function startVoiceNote(chatId: string, mode: VoiceNoteMode = 'tap'): void {
   // 0) A note on a dictation backend this chat's host has no key for would be
   // recorded and then refused on upload — say so at the press instead.
-  const refusal = voiceKeyRefusal(chatId, 'dictation');
-  if (refusal !== null) {
-    console.log(`[patch-voice] note refused: ${refusal}`);
-    useUiStore.getState().pushError(`voice note: ${refusal}`);
-    return;
-  }
+  if (!ensureDictationReady(chatId)) return;
   // 1) Mount the overlay synchronously — no await before this point.
   const gen = ++_noteGen;
   // The recording overlay is a VOICE surface — never leave the composer's soft

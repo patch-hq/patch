@@ -252,6 +252,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     audioRelayHost: '127.0.0.1:3003',
     backends: [{ id: 'claude-code', label: 'Claude Code', version: '2.1.220', state: 'present' }],
     components: [{ id: 'kokoro', label: 'Kokoro TTS', bytes: 340_000_000, state: 'not-installed' }],
+    voiceLocal: { whisper: false, parakeet: false, kokoro: false },
     voiceCatalog: {},
     voiceKeys: { gemini: false, openai: true, groq: false },
   },

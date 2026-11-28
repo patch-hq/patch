@@ -19,6 +19,7 @@ import {
   DEFAULT_VOICE_CONFIG,
   type AudioEvent,
   type SpeechToTextEngine,
+  type VoiceKeys,
 } from '@patch/wire/audio';
 
 const SECRET = 'unit-test-internal-token-aaaaaaaaaa';
@@ -89,23 +90,10 @@ async function deviceConversation(
 }
 
 describe('createSpeechToTextResolver', () => {
-  test('names the engine and why it cannot run, with no other engine offered', () => {
-    const resolve = createSpeechToTextResolver({
-      build: () => ({ unavailable: 'the Parakeet model is not installed on this host' }),
-    });
-    const r = resolve('parakeet');
-    expect(r).toEqual({
-      ok: false,
-      engine: 'parakeet',
-      message:
-        'Speech to text is set to Parakeet on host, but the Parakeet model is not installed on this host. Switch Speech to text to another engine in Settings → Voice.',
-    });
-  });
-
   test('returns the backend the host built for that engine', () => {
     const groq = stub();
-    const resolve = createSpeechToTextResolver({ build: () => ({ whisper: groq }) });
-    expect(resolve('groq')).toEqual({ ok: true, whisper: groq });
+    const resolve = createSpeechToTextResolver({ build: () => groq });
+    expect(resolve('groq')).toBe(groq);
   });
 });
 
@@ -121,6 +109,8 @@ describe('audio server — speech to text setting on a host-speech conversation'
   async function start(
     speechToText: SpeechToTextEngine,
     resolve: ReturnType<typeof createSpeechToTextResolver>,
+    voiceKeys: Partial<VoiceKeys> = {},
+    local: { kokoro: boolean } = { kokoro: true },
   ): Promise<number> {
     const handle = await startAudioServer({
       makeTimeline: () => ({
@@ -140,6 +130,11 @@ describe('audio server — speech to text setting on a host-speech conversation'
       chatExists: () => true,
       getVoiceConfig: () => ({ ...DEFAULT_VOICE_CONFIG, speechToText }),
       resolveSpeechToText: resolve,
+      voiceFacts: () => ({
+        hostName: 'the Mac',
+        voiceKeys: { gemini: false, openai: false, groq: false, ...voiceKeys },
+        localEngines: { whisper: true, parakeet: true, kokoro: local.kokoro },
+      }),
     });
     server = Object.assign(handle, { port: handle.address().port });
     return server.port;
@@ -152,7 +147,7 @@ describe('audio server — speech to text setting on a host-speech conversation'
       createSpeechToTextResolver({
         build: (engine) => {
           asked.push(engine);
-          return { unavailable: 'no ElevenLabs key is set on this host' };
+          return stub();
         },
       }),
     );
@@ -165,10 +160,97 @@ describe('audio server — speech to text setting on a host-speech conversation'
         type: 'audio.error',
         code: 'whisper_unavailable',
         message:
-          'Speech to text is set to ElevenLabs Scribe, but no ElevenLabs key is set on this host. Switch Speech to text to another engine in Settings → Voice.',
+          'Voice devices need an ElevenLabs key on the Mac. Set it up in Settings → Providers.',
       },
     ]);
-    expect(asked).toEqual(['elevenlabs']);
+    expect(asked).toEqual([]);
+  });
+
+  test('a spoken alert plays with no speech to text configured on the host', async () => {
+    // Groq is chosen and this host has no Groq key: a call is refused (above),
+    // but an announcement never listens, so it needs only speech.
+    const asked: SpeechToTextEngine[] = [];
+    const port = await start(
+      'groq',
+      createSpeechToTextResolver({
+        build: (engine) => {
+          asked.push(engine);
+          return stub();
+        },
+      }),
+    );
+    const sessionId = 'announce-no-stt';
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/audio/${sessionId}`);
+    const events: AudioEvent[] = [];
+    ws.on('message', (d: Buffer, bin: boolean) => {
+      if (!bin) events.push(decodeAudio(d));
+    });
+    await new Promise<void>((res, rej) => {
+      ws.once('open', () => res());
+      ws.once('error', rej);
+    });
+    ws.send(
+      encodeAudio({
+        type: 'audio.session_start',
+        sessionId,
+        accountId: 'a',
+        surfaceId: 'surf',
+        surfaceKind: 'web',
+        chatId: 'c1',
+        role: 'announcement',
+        token: token(sessionId),
+        surfaceHasAec: true,
+      }),
+    );
+    ws.send(encodeAudio({ type: 'audio.speak', sessionId, text: 'The build finished.' }));
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'audio.tts_end')).toBe(true), {
+      timeout: 3000,
+    });
+    expect(events.some((e) => e.type === 'audio.error')).toBe(false);
+    expect(asked).toEqual([]);
+    ws.close();
+  });
+
+  test('a spoken alert is refused, calmly named, when the host has no speech voice', async () => {
+    const port = await start(
+      'groq',
+      createSpeechToTextResolver({ build: () => stub() }),
+      {},
+      {
+        kokoro: false,
+      },
+    );
+    const sessionId = 'announce-no-tts';
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/audio/${sessionId}`);
+    const events: AudioEvent[] = [];
+    ws.on('message', (d: Buffer, bin: boolean) => {
+      if (!bin) events.push(decodeAudio(d));
+    });
+    await new Promise<void>((res, rej) => {
+      ws.once('open', () => res());
+      ws.once('error', rej);
+    });
+    ws.send(
+      encodeAudio({
+        type: 'audio.session_start',
+        sessionId,
+        accountId: 'a',
+        surfaceId: 'surf',
+        surfaceKind: 'web',
+        chatId: 'c1',
+        role: 'announcement',
+        token: token(sessionId),
+        surfaceHasAec: true,
+      }),
+    );
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'audio.error')).toBe(true), {
+      timeout: 2000,
+    });
+    expect(events[0]).toMatchObject({
+      code: 'kokoro_unavailable',
+      message:
+        'Spoken alerts need a speech voice on the Mac. Set it up in Settings → Hosts → Components.',
+    });
   });
 
   test('the call opens on the engine the account chose', async () => {
@@ -178,9 +260,10 @@ describe('audio server — speech to text setting on a host-speech conversation'
       createSpeechToTextResolver({
         build: (engine) => {
           asked.push(engine);
-          return { whisper: stub() };
+          return stub();
         },
       }),
+      { groq: true },
     );
     const c = await deviceConversation(port, 'stt-ok');
     await vi.waitFor(() => expect(c.events.some((e) => e.type === 'audio.state')).toBe(true), {

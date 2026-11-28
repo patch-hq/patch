@@ -3,12 +3,13 @@
 // shortcut. Meetings have their own page (MeetingsPage).
 
 import type { JSX } from 'react';
+import { SetupLine } from '../../components/SetupLine.js';
 import { useEffect, useState } from 'react';
 import {
   SPEECH_TO_TEXT_LABEL,
   dictationEnginesFor,
   SpeechToTextEngine,
-  voiceKeyHostStatus,
+  backendSetupLine,
   type AudioSurfaceKind,
   type DictationConfig,
   type DictationEngine,
@@ -271,12 +272,8 @@ function DictationEnginesGroup(): JSX.Element {
   const dictating = (devices ?? []).filter((d) => DICTATING_KINDS.has(d.surfaceKind));
   // A paid choice names each host that holds no key for it.
   const keys = (engine: DictationEngine, testid: string): JSX.Element | undefined => {
-    const status = voiceKeyHostStatus(engine, hostReports);
-    return status ? (
-      <span className="set-sub-line set-sub-error" data-testid={testid}>
-        {status}
-      </span>
-    ) : undefined;
+    const status = backendSetupLine(engine, hostReports);
+    return status ? <SetupLine text={status} testid={testid} /> : undefined;
   };
   return (
     <Group label="Engine" testid="settings-voice-dictation-engines">

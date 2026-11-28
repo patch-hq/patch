@@ -39,9 +39,18 @@ What the voice agent is told is the user's. The account's voice instructions are
 The host relays every voice agent call. A surface opens the same audio WSS with the same `audio.session_start`, streams the same 16 kHz PCM16 up and plays the same 24 kHz PCM16 down whatever the provider; the host holds its own server-side connection to the provider and relays audio both ways (resampling where the provider's rate differs). No surface ever talks to a voice agent provider or holds a provider key or ephemeral token. The provider keys (`GEMINI_API_KEY`, `OPENAI_REALTIME_API_KEY`, `ELEVEN_LABS_API_KEY`) are shared by every host: set once from Settings → Keys, which fans the write out to every host that's online, and each host stores its own copy (or reads it from its own environment, with the Settings one winning) — `02-host.md` § Provider keys. A key set or revoked there applies to the next session on every host, with no restart. `OPENAI_REALTIME_API_KEY` is deliberately not `OPENAI_API_KEY`, which the agent processes a host runs would pick up and bill. A missing key never stops the host — voice is one setting, and every chat on the host would go down with it, and a host that is down cannot be given the key from Settings. Instead:
 
 - At boot, whenever the voice setup changes, and whenever a key is set or revoked, the host logs an error if the chosen provider has no key on that host, naming the key.
-- Every voice agent session there is refused at its start with `audio.error {code: 'voice_key_missing'}`, and the message is one fixed sentence every surface shows as is: _"The voice agent is set to Gemini, but GEMINI_API_KEY is not set on this host. Choose another provider in Settings → Voice calls."_ — provider, key, and the fix. Nothing falls back to another provider or to a direct call.
-- Surfaces fail at the press: a call or hands-free session shows the sentence on the call bar.
-- Each host reports which keys it holds on `host.host.voiceKeys: {gemini, openai, elevenlabs, deepgram}`, re-published whenever one is set or revoked. Settings → Voice calls marks the provider _"Not configured on <host>: <KEY> is missing. Calls there are refused."_ for each host that lacks it, and the line clears as soon as that host reports the key. A host that has not reported `voiceKeys` is not called unconfigured.
+- Every voice agent session there is refused at its start with `audio.error {code: 'voice_key_missing'}`. The message is the readiness sentence for the missing key (§ Readiness), for example _"Calls need a Gemini key on the Mac. Set it up in Settings → Providers."_ Nothing falls back to another provider or to a direct call.
+- Each host reports which keys it holds on `host.host.voiceKeys: {gemini, openai, groq, elevenlabs, deepgram, assemblyai}`, re-published whenever one is set or revoked, and which on-device engines it has on `host.host.voiceLocal: {whisper, parakeet, kokoro}`. Settings marks a choice that a host cannot run _"Needs a Gemini key on <host>."_ with a Set up action, and the line clears as soon as that host reports the key.
+
+### Readiness
+
+A voice feature is checked when the user engages with it, not when it first fails. Each feature declares what it needs: a provider key, a speech-to-text engine, a text-to-speech engine or voice, microphone permission, notification permission, an installed on-device engine. One model (`voiceReadiness` in `@patch/wire`) evaluates those needs against what the host and the device report. Surfaces use it at the moment of engagement; the host uses the same function when it refuses a session, so the two never disagree and say the same sentence.
+
+- Engagement is the moment the user picks the feature: turning on Auto-notify, starting a call of any kind, the call menu, choosing a provider or engine in Settings, the mic.
+- Missing setup is an invitation, not an error: one calm sentence naming what is missing and where (_"Spoken alerts need a speech voice on the Mac."_) and a Set up action that opens the Settings page that fixes it in one step. It is neutral, never red, never "failed, try again". The feature is not started, and a switch stays off.
+- Where a feature truly cannot run at the moment it is needed (a spoken alert arrives and the host has no voice), the surface says so in the same calm sentence with the same action.
+- An announcement needs only text to speech (§ Speaking with no session open). It never needs speech to text, the microphone or a voice agent key.
+- Nothing known yet (preferences not loaded, host not reported) is not a gap: the host decides, in the same words.
 
 A provider's failure (other than a missing key) — it could not open, it errored, a reply failed or produced no audio, a transcription failed — reaches the surface as `audio.error {code: 'gemini_unavailable' | 'openai_unavailable' | 'elevenlabs_unavailable'}` naming what went wrong. If the provider's side of the session is gone (never opened, or closed under the host), the host also ends the surface's session, so the surface stops streaming into a dead engine and shows the failure with a retry (§ 2. Voice call).
 
@@ -495,6 +504,8 @@ Under `auto-notify` an interrupt is spoken on a surface that is not in a session
 
 There is no reply path. `auto-notify` is monitoring, not conversation: to answer, the user opens a session.
 
+An announcement session needs only the host's text to speech. The host does not resolve a speech-to-text engine for it, so a host with no Groq key, no Whisper and no Parakeet still speaks. If the host has no voice, turning Auto-notify on shows the readiness invitation (§ Readiness) instead of switching it on.
+
 ## Dictation into the composer
 
 The composer's mic, on web/desktop and on mobile, dictates: it puts words into the chat's input for the user to edit and send. It never commits a turn of its own — the composer decides that.
@@ -519,7 +530,7 @@ An in-flight dictation is discarded without transcribing by `esc` on web/desktop
 
 What reads speech in a host-speech conversation (§ Host speech engines) is the account setting `voiceConfig.speechToText`, not the host's `WHISPER_BACKEND`. Settings → Dictation → Speech to text offers `Groq Whisper` (`groq`, the default), `Whisper on host` (`whisper`), `Parakeet on host` (`parakeet`) and `ElevenLabs Scribe` (`elevenlabs`). It is read on every new session, so a change applies to the next call. The dictation tidy-up row (**Tidy up each phrase with …**) uses the same engine.
 
-Each host resolves the choice itself: `groq` and `elevenlabs` need that key on the host, `whisper` needs the Whisper component installed (its model present), `parakeet` needs `PARAKEET_MODEL_DIR`. A host that cannot run the chosen engine refuses the session with `audio.error {whisper_unavailable}` whose message names the engine and what is missing — never answered by another engine. `WHISPER_BACKEND` still decides the host's own Whisper for dictation, voice notes and meetings.
+Each host resolves the choice itself: `groq` and `elevenlabs` need that key on the host, `whisper` needs the Whisper component installed (its model present), `parakeet` needs `PARAKEET_MODEL_DIR`. A host that cannot run the chosen engine refuses the session with `audio.error {whisper_unavailable}` whose message is the readiness sentence naming what is missing — never answered by another engine. Only sessions that listen need it; a spoken alert does not. `WHISPER_BACKEND` still decides the host's own Whisper for dictation, voice notes and meetings.
 
 ### Dictation engines
 

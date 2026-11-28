@@ -429,11 +429,11 @@ describe('Voice calls: key status', () => {
       </>,
     );
     expect(textOf(findHost(r.root, byTestId('dictation-phone-1-keys')))).toBe(
-      'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
+      'Needs a Deepgram key on hetzner.',
     );
     expect(queryHost(r.root, byTestId('dictation-mac-1-keys'))).toBeNull();
     expect(textOf(findHost(r.root, byTestId('voice-keys')))).toBe(
-      'Not configured on laptop, hetzner: no OpenAI key is set. Sessions there are refused.',
+      'Needs an OpenAI key on laptop, hetzner.',
     );
   });
 

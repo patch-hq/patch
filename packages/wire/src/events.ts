@@ -3789,20 +3789,28 @@ export const HostInfoEvent = z
      * config matrix): GEMINI_API_KEY and OPENAI_REALTIME_API_KEY. Settings →
      * Voice marks a cell whose backend's key is missing here as not configured
      * on this host. A missing key never stops the host; it refuses that
-     * surface's sessions with `voice_key_missing`. Absent = a host older than
-     * this report, which says nothing either way. Not strict: a provider added
+     * surface's sessions with `voice_key_missing`. Not strict: a provider added
      * later must not make an older client reject the whole host event.
      */
-    voiceKeys: z
-      .object({
-        gemini: z.boolean(),
-        openai: z.boolean(),
-        groq: z.boolean(),
-        elevenlabs: z.boolean().optional(),
-        deepgram: z.boolean().optional(),
-        assemblyai: z.boolean().optional(),
-      })
-      .optional(),
+    voiceKeys: z.object({
+      gemini: z.boolean(),
+      openai: z.boolean(),
+      groq: z.boolean(),
+      elevenlabs: z.boolean().optional(),
+      deepgram: z.boolean().optional(),
+      assemblyai: z.boolean().optional(),
+    }),
+    /**
+     * The on-device speech engines this host has installed (spec/07 §
+     * Readiness): Whisper and Parakeet read speech, Kokoro speaks. With
+     * `voiceKeys` this is everything a surface needs to tell whether a voice
+     * feature can run on this host before the user starts it.
+     */
+    voiceLocal: z.object({
+      whisper: z.boolean(),
+      parakeet: z.boolean(),
+      kokoro: z.boolean(),
+    }),
     /**
      * spec/07 § Call cost — what this host's voice calls have cost, this
      * calendar month (UTC) and in all. Absent = a host older than call

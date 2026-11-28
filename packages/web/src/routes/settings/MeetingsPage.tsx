@@ -2,7 +2,8 @@
 // who is speaking.
 
 import type { JSX } from 'react';
-import { voiceKeyHostStatus, type MeetingEngine } from '@patch/wire/audio';
+import { SetupLine } from '../../components/SetupLine.js';
+import { backendSetupLine, type MeetingEngine } from '@patch/wire/audio';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
@@ -60,18 +61,12 @@ function MeetingEngineGroup(): JSX.Element {
   const hostReports = Object.values(hosts).flatMap((h) =>
     h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
   );
-  const status = voiceKeyHostStatus(voiceConfig.meeting, hostReports);
+  const status = backendSetupLine(voiceConfig.meeting, hostReports);
   return (
     <Group testid="settings-voice-meeting">
       <Row
         title="Transcription"
-        sub={
-          status ? (
-            <span className="set-sub-line set-sub-error" data-testid="meeting-engine-keys">
-              {status}
-            </span>
-          ) : undefined
-        }
+        sub={status ? <SetupLine text={status} testid="meeting-engine-keys" /> : undefined}
         testid="meeting-engine"
       >
         <Pills

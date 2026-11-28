@@ -86,7 +86,9 @@ export interface HostDescriptionInput {
   elevenLabsVoices?: { id: string; name: string; category?: string }[] | undefined;
   elevenLabsVoicesError?: string | undefined;
   /** Which hosted-voice provider keys this host holds (`host.host.voiceKeys`). */
-  voiceKeys?: HostInfoEvent['voiceKeys'];
+  voiceKeys: HostInfoEvent['voiceKeys'];
+  /** The on-device speech engines this host has installed (`host.host.voiceLocal`). */
+  voiceLocal: HostInfoEvent['voiceLocal'];
   /** Each voice agent provider's models and voices as this host read them (`host.host.voiceCatalog`). */
   voiceCatalog: HostInfoEvent['voiceCatalog'];
   /** What this host's voice calls have cost (`host.host.voiceUsage`, spec/07 § Call cost). */
@@ -176,7 +178,8 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.elevenLabsVoicesError !== undefined
       ? { elevenLabsVoicesError: input.elevenLabsVoicesError }
       : {}),
-    ...(input.voiceKeys !== undefined ? { voiceKeys: input.voiceKeys } : {}),
+    voiceKeys: input.voiceKeys,
+    voiceLocal: input.voiceLocal,
     voiceCatalog: input.voiceCatalog,
     ...(input.voiceUsage !== undefined ? { voiceUsage: input.voiceUsage } : {}),
     ...(input.providerKeys !== undefined ? { providerKeys: input.providerKeys } : {}),

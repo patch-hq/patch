@@ -10,6 +10,7 @@ import { Bell, Volume2 } from 'lucide-react';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { failed } from '../lib/errorCopy.js';
+import { ensureVoiceReady } from '../lib/voiceReadiness.js';
 
 export function ReachSwitch(): JSX.Element {
   const reach = usePreferencesStore((s) => s.preferences.reach);
@@ -29,6 +30,8 @@ export function ReachSwitch(): JSX.Element {
          Copy — no helper text reserves tooltips for icon-only controls. The
          old one was two sentences explaining the mode. */
       onClick={() => {
+        // Spoken alerts are checked the moment they are asked for, not when the first one plays.
+        if (!auto && !ensureVoiceReady({ feature: 'spoken-alert' })) return;
         void update({ reach: auto ? 'notify' : 'auto-notify' }).catch((e: Error) =>
           pushError(failed('settings'), undefined, e.message),
         );

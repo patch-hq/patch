@@ -24,6 +24,8 @@ async function spendEveryAccount(page: Page): Promise<void> {
     };
     w.__presenceStore.getState().setHostReport({
       type: 'host.host',
+      voiceKeys: { gemini: false, openai: false, groq: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       hostId: 'd1',
       hostName: 'ubuntu-4gb-hel1-1',

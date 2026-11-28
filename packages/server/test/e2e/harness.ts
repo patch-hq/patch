@@ -334,6 +334,8 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
             managerClear: true,
             backends: [],
             components: [],
+            voiceKeys: { gemini: false, openai: false, groq: false },
+            voiceLocal: { whisper: false, parakeet: false, kokoro: false },
             voiceCatalog: {},
           }),
         );

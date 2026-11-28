@@ -4,6 +4,7 @@
 // host read from the provider's API (`host.host.voiceCatalog`), with Refresh.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
+import { SetupLine } from '../../components/SetupLine.js';
 import {
   CATALOG_PROVIDER_LABEL,
   VOICE_AGENT_ENGINES,
@@ -11,7 +12,7 @@ import {
   VoiceAgentProvider,
   soundValues,
   voiceCatalogView,
-  voiceKeyHostStatus,
+  backendSetupLine,
   voiceToneKey,
   type CatalogItem,
   type CatalogProvider,
@@ -374,7 +375,7 @@ export function VoiceAgentGroup(): JSX.Element {
     void patchShared('voice agent', {
       voiceAgent: { ...agent, setups: { ...agent.setups, [provider]: next } },
     });
-  const keyStatus = voiceKeyHostStatus(
+  const keyStatus = backendSetupLine(
     provider,
     Object.values(hosts).flatMap((h) =>
       h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
@@ -384,13 +385,7 @@ export function VoiceAgentGroup(): JSX.Element {
     <Group label="Voice agent" testid="settings-voice-agent">
       <Row
         title="Provider"
-        sub={
-          keyStatus ? (
-            <span className="set-sub-line set-sub-error" data-testid="voice-keys">
-              {keyStatus}
-            </span>
-          ) : undefined
-        }
+        sub={keyStatus ? <SetupLine text={keyStatus} testid="voice-keys" /> : undefined}
         testid="voice-provider"
       >
         <Pills

@@ -15,6 +15,7 @@
 // how they answer.
 
 import React from 'react';
+import { SetupLine } from './SetupLine';
 import { Alert, Text, View } from 'react-native';
 import { api, type AccountPreferences } from '../../api/rest';
 import { space, typography, useTheme } from '../../lib/theme';
@@ -24,7 +25,7 @@ import {
   SPEECH_TO_TEXT_LABEL,
   SpeechToTextEngine,
   dictationEnginesFor,
-  voiceKeyHostStatus,
+  backendSetupLine,
   type AudioSurfaceKind,
   type DictationEngine,
   type MeetingEngine,
@@ -557,21 +558,12 @@ function MeetingEngineRow(): React.ReactElement {
     <WithSettings testID="voice-meeting-engine">
       {(data) => {
         const voiceConfig = data.preferences.voiceConfig;
-        const status = voiceKeyHostStatus(voiceConfig.meeting, hostReports);
+        const status = backendSetupLine(voiceConfig.meeting, hostReports);
         return (
           <Row
             title="Transcription"
             testID="meeting-engine"
-            subtitle={
-              status ? (
-                <Text
-                  testID="meeting-engine-keys"
-                  style={{ ...typography.meta, color: colors.red }}
-                >
-                  {status}
-                </Text>
-              ) : undefined
-            }
+            subtitle={status ? <SetupLine text={status} testID="meeting-engine-keys" /> : undefined}
             stack
           >
             <Chips
@@ -617,12 +609,8 @@ function DictationEngines(): React.ReactElement {
         const own = data.preferences.deviceDictation ?? {};
         const devices = data.devices.filter((d) => d.surfaceKind in DICTATION_KIND_LABELS);
         const keys = (engine: DictationEngine, testID: string): React.ReactNode => {
-          const status = voiceKeyHostStatus(engine, hostReports);
-          return status ? (
-            <Text testID={testID} style={{ ...typography.meta, color: colors.red }}>
-              {status}
-            </Text>
-          ) : undefined;
+          const status = backendSetupLine(engine, hostReports);
+          return status ? <SetupLine text={status} testID={testID} /> : undefined;
         };
         return (
           <>

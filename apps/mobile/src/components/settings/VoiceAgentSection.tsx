@@ -4,6 +4,7 @@
 // renderer, Agents calling you, Calls, and how voice devices answer.
 
 import React from 'react';
+import { SetupLine } from './SetupLine';
 import { PanResponder, Text, View, type LayoutChangeEvent } from 'react-native';
 import {
   CATALOG_PROVIDER_LABEL,
@@ -12,7 +13,7 @@ import {
   VoiceAgentProvider,
   soundValues,
   voiceCatalogView,
-  voiceKeyHostStatus,
+  backendSetupLine,
   voiceToneKey,
   type CatalogItem,
   type CatalogProvider,
@@ -376,7 +377,7 @@ function VoiceAgentRows({ preferences }: { preferences: AccountPreferences }): R
     void patchShared('Voice agent', {
       voiceAgent: { ...agent, setups: { ...agent.setups, [provider]: next } },
     });
-  const keyStatus = voiceKeyHostStatus(
+  const keyStatus = backendSetupLine(
     provider,
     Object.values(hosts).flatMap((h) =>
       h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
@@ -387,13 +388,7 @@ function VoiceAgentRows({ preferences }: { preferences: AccountPreferences }): R
       <Row
         title="Provider"
         testID="voice-provider"
-        subtitle={
-          keyStatus ? (
-            <Text testID="voice-keys" style={{ ...typography.meta, color: colors.red }}>
-              {keyStatus}
-            </Text>
-          ) : undefined
-        }
+        subtitle={keyStatus ? <SetupLine text={keyStatus} testID="voice-keys" /> : undefined}
         stack
       >
         <Chips

@@ -76,6 +76,8 @@ export function reportHost(
   s.setHostOnline(hostId, online);
   s.setHostReport({
     type: 'host.host',
+    voiceKeys: { gemini: true, openai: true, groq: true, elevenlabs: true, deepgram: true },
+    voiceLocal: { whisper: true, parakeet: true, kokoro: true },
     voiceCatalog: {},
     hostId,
     hostName: hostId,

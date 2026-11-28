@@ -75,6 +75,8 @@ import {
 import { addressWordOrNull, pauseWhenQuietMinutes, voiceAgentOrNull } from './preferences';
 import { callEngineLabel, describeMicSilent, describeVoiceError } from './voiceEngine';
 import { ensurePermission } from './permissionGate';
+import { ensureVoiceReady } from './voiceReadiness';
+import { useChatStore } from '../stores/chatStore';
 
 export class VoiceAudioConnectError extends Error {
   override readonly name = 'VoiceAudioConnectError';
@@ -224,6 +226,18 @@ export function startVoiceCall(
     resume?: boolean;
   } = {},
 ): void {
+  // spec/07 § Readiness — checked before dialling: a missing key or engine is
+  // an invitation to set it up, not a call that fails. A call coming back from
+  // a pause was ready when it began.
+  if (
+    opts.resume !== true &&
+    !ensureVoiceReady(
+      { feature: 'call', surface: mode === 'hands-free' ? 'hands-free' : 'call' },
+      useChatStore.getState().chats[chatId]?.hostId,
+    )
+  ) {
+    return;
+  }
   _line?.end();
   clearQuietTimer();
   // A new call (not this one coming back from a pause) sets how it holds focus.

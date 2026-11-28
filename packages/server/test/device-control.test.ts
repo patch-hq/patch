@@ -90,6 +90,8 @@ describe('voice device control on the server', () => {
     await app.listen({ port: 0, host: '127.0.0.1' });
     hostLink.emit({
       type: 'host.host',
+      voiceKeys: { gemini: false, openai: false, groq: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       hostId: HOST_ID,
       hostName: 'Netcup',
