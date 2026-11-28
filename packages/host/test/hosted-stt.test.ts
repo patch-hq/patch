@@ -74,9 +74,7 @@ describe('picking the dictation transcriber', () => {
     expect(pickDictationTranscriber('deepgram', t)).toEqual({
       ok: false,
       backend: 'deepgram',
-      message:
-        'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-        'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.',
+      message: 'Dictation needs a Deepgram key on this host. Set it up in Settings → Providers.',
     });
     const withKey = createDictationTranscribers({ logger, local, deepgramApiKey: 'd' });
     const picked = pickDictationTranscriber('deepgram', withKey);

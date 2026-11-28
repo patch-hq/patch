@@ -255,6 +255,8 @@ describe("a host's self-description", () => {
     audioRelayHost: '127.0.0.1:3003',
     backends: [],
     components: [],
+    voiceKeys: { gemini: false, openai: false, groq: false },
+    voiceLocal: { whisper: false, parakeet: false, kokoro: false },
     voiceCatalog: {},
   };
 
@@ -322,6 +324,8 @@ describe('the greeting carries every registered host', () => {
       { id: 'claude-code', label: 'Claude Code', version: '2.1.0', state: 'present' as const },
     ],
     components: [{ id: 'kokoro', label: 'Kokoro', bytes: 82_000_000, state: 'installed' as const }],
+    voiceKeys: { gemini: false, openai: false, groq: false },
+    voiceLocal: { whisper: false, parakeet: false, kokoro: false },
     voiceCatalog: {},
   };
 

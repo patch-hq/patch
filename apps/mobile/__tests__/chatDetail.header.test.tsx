@@ -134,6 +134,8 @@ describe('chat-detail header', () => {
     seedChat('c1', { hostId: 'd1' });
     usePresenceStore.getState().setHostReport({
       type: 'host.host',
+      voiceKeys: { gemini: false, openai: false, groq: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       hostId: 'd1',
       hostName: 'hetzner',

@@ -102,6 +102,7 @@ import { getDesktopBridge } from './lib/desktopBridge.js';
 import { initNotificationActionBridge } from './lib/notificationActionBridge.js';
 import { useBatchWatcher } from './lib/batchNotifier.js';
 import { useDesktopNavigation } from './lib/desktopNavigation.js';
+import { setAppNavigate } from './lib/appNavigate.js';
 import { useNotificationLevelSync } from './lib/useNotificationLevelSync.js';
 import { failed } from './lib/errorCopy.js';
 import { loadChatList, saveChatList } from './lib/chatListCache.js';
@@ -137,6 +138,10 @@ export function AppShell(): JSX.Element {
   const setArchivedOpen = useUiStore((s) => s.setArchivedOpen);
   const setCheatSheetOpen = useUiStore((s) => s.setCheatSheetOpen);
   const navigate = useNavigate();
+  useEffect(() => {
+    setAppNavigate(navigate);
+    return () => setAppNavigate(null);
+  }, [navigate]);
   const location = useLocation();
   // A chat the new-chat screen created and the user left empty is deleted
   // (spec/14 § New chat drafts).

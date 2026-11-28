@@ -19,6 +19,8 @@ async function hold(page: Page, since: number | null): Promise<void> {
     const row = w.__store.getState().chats['chat_md']!;
     w.__presenceStore.getState().setHostReport({
       type: 'host.host',
+      voiceKeys: { gemini: false, openai: false, groq: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       hostId: row.hostId,
       hostName: 'studio-mac',

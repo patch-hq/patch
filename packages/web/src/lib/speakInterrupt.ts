@@ -12,7 +12,8 @@
 import { openAudioSession, type AudioSession, type AudioSessionDeps } from './audioSession.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { failed } from './errorCopy.js';
+import { ensureVoiceReady } from './voiceReadiness.js';
+import { useChatStore } from '../stores/chatStore.js';
 
 /** Test seam: inject the audio-session opener. */
 type Opener = typeof openAudioSession;
@@ -41,6 +42,12 @@ export async function speakInterrupt(
   deps?: AudioSessionDeps,
 ): Promise<void> {
   if (useVoiceStore.getState().call !== null) return;
+  // Cannot speak here right now: say so calmly, with the fix, and do not open a session.
+  if (
+    !ensureVoiceReady({ feature: 'spoken-alert' }, useChatStore.getState().chats[chatId]?.hostId)
+  ) {
+    return;
+  }
   // One at a time: a second interrupt while the first is still speaking replaces
   // it rather than talking over it.
   active?.end('superseded');
@@ -65,7 +72,7 @@ export async function speakInterrupt(
         onBargeIn: () => {},
         onLevel: () => {},
         onError: (m) => {
-          useUiStore.getState().pushError(failed('spoken alert'), undefined, m);
+          useUiStore.getState().pushNotice(m);
           close();
         },
         onClose: () => {
@@ -79,6 +86,6 @@ export async function speakInterrupt(
     timer = window.setTimeout(close, SPEAK_TIMEOUT_MS);
   } catch (err) {
     active = null;
-    useUiStore.getState().pushError(failed('spoken alert'), undefined, (err as Error).message);
+    useUiStore.getState().pushNotice((err as Error).message);
   }
 }

@@ -53,6 +53,8 @@ describe('HostProviderKey', () => {
       audioRelayHost: '127.0.0.1:3003',
       backends: [],
       components: [],
+      voiceKeys: { gemini: false, openai: false, groq: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       providerKeys: [{ id: 'gemini', source: 'none', envSet: false }],
     };

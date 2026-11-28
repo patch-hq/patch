@@ -13,6 +13,7 @@ const prefs = vi.hoisted(() => ({ quiet: 0 }));
 vi.mock('../src/lib/preferences', () => ({
   addressWordOrNull: () => 'patch',
   voiceAgentOrNull: () => null,
+  voiceConfigOrNull: () => null,
   pauseWhenQuietMinutes: () => prefs.quiet,
 }));
 const cues = vi.hoisted(() => ({ played: [] as string[] }));

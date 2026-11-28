@@ -10,6 +10,8 @@
 //
 // There is no reply path. This is monitoring, not conversation.
 
+import { ensureVoiceReady } from './voiceReadiness';
+import { useChatStore } from '../stores/chatStore';
 import { Audio } from 'expo-av';
 import { decodeAudio, type AudioEvent } from '@patch/wire/audio';
 import { answerHeartbeat } from './audioHeartbeat';
@@ -67,6 +69,12 @@ async function teardown(): Promise<void> {
  */
 export function speakInterrupt(chatId: string, message: string): void {
   if (useVoiceStore.getState().activeSession) return;
+  // Cannot speak here right now: say so calmly, with the fix, and open no session.
+  if (
+    !ensureVoiceReady({ feature: 'spoken-alert' }, useChatStore.getState().chats[chatId]?.hostId)
+  ) {
+    return;
+  }
   const gen = ++_gen;
   /** Replaced by a newer interrupt, or a call has come up and owns the audio. */
   const stale = (): boolean => gen !== _gen || useVoiceStore.getState().activeSession !== null;
@@ -120,7 +128,7 @@ export function speakInterrupt(chatId: string, message: string): void {
         if (frame.type === 'audio.tts_end') {
           finish();
         } else if (frame.type === 'audio.error') {
-          useUiStore.getState().pushError(`spoken alert: ${frame.code}: ${frame.message}`);
+          useUiStore.getState().pushInvitation(frame.message);
           finish();
         }
       };
@@ -144,7 +152,7 @@ export function speakInterrupt(chatId: string, message: string): void {
       _timer = setTimeout(finish, SPEAK_TIMEOUT_MS);
     } catch (e) {
       if (gen === _gen) await teardown();
-      useUiStore.getState().pushError(`spoken alert failed: ${(e as Error).message}`);
+      useUiStore.getState().pushInvitation((e as Error).message);
     }
   })();
 }

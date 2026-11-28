@@ -50,6 +50,8 @@ describe('server-run queue through the hub', () => {
     // The host: announces itself as able to take queued messages, and a chat.
     hostLink.emit({
       type: 'host.host',
+      voiceKeys: { gemini: false, openai: false, groq: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       hostId: 'd1',
       hostName: 'host',

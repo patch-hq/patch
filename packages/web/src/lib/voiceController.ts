@@ -17,6 +17,7 @@ import { startRecording, type VoiceRecording, type VoiceRecorderDeps } from './v
 import { api } from '../api/rest.js';
 import { useVoiceStore, type VoiceNoteGesture } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { ensureVoiceReady } from './voiceReadiness.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { addressWordOrNull, usePreferencesStore } from '../stores/preferencesStore.js';
 import type { PauseReason } from '../stores/voiceStore.js';
@@ -347,6 +348,16 @@ export async function startVoiceCall(
   const store = useVoiceStore.getState();
   if (store.call) {
     // Already on a call: it stays on the chat it was started on, wherever the user goes.
+    return;
+  }
+  // spec/07 § Readiness — checked before dialling, so a missing key or engine
+  // is an invitation to set it up and not a call that fails.
+  if (
+    !ensureVoiceReady(
+      { feature: 'call', surface: mode === 'hands-free' ? 'hands-free' : 'call' },
+      useChatStore.getState().chats[chatId]?.hostId,
+    )
+  ) {
     return;
   }
   store.endNote();

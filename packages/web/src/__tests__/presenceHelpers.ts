@@ -76,6 +76,8 @@ export function reportHost(
     runsManager,
     audioRelayHost,
     voiceCatalog,
+    voiceKeys,
+    voiceLocal,
     ...rest
   } = patch;
   usePresenceStore.getState().setHostReport({
@@ -93,6 +95,14 @@ export function reportHost(
     backends: [],
     components: [],
     voiceCatalog: voiceCatalog ?? {},
+    voiceKeys: voiceKeys ?? {
+      gemini: true,
+      openai: true,
+      groq: true,
+      elevenlabs: true,
+      deepgram: true,
+    },
+    voiceLocal: voiceLocal ?? { whisper: true, parakeet: true, kokoro: true },
     // Anything else the test names (harnessMcpServers, kokoroVoice, backends,
     // updateAvailable, …) is reported exactly as given.
     ...rest,

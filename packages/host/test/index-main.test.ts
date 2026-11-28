@@ -4491,24 +4491,27 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
         secrets: { claude: [], codex: [], providerKeys: {} },
       });
       await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 1);
-      // The last report: what this setup cannot run here.
-      const missing = lines.filter((l) => l['missingKey'] !== undefined).slice(-4);
-      expect(missing.map((l) => [l['level'], l['surface'], l['missingKey'], l['msg']])).toEqual([
-        [
-          50,
-          'dictation',
-          'DEEPGRAM_API_KEY',
-          'voice: Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-            'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation. Its sessions will be refused.',
-        ],
-        ...(['Voice device', 'Hands-free', 'Call'] as const).map((label) => [
-          50,
-          label === 'Voice device' ? 'device' : label === 'Hands-free' ? 'hands-free' : 'call',
-          'OPENAI_REALTIME_API_KEY',
-          `voice: ${label} is set to openai, but no OpenAI key is set on this host. ` +
-            `Add it in Settings → Providers, or switch ${label} to another backend in Settings → Voice. Its sessions will be refused.`,
+      // The last report: what this setup cannot run here, in the readiness model's words.
+      const missing = lines.filter((l) => l['need'] !== undefined);
+      const said = missing.map((l) => [l['level'], l['feature'], l['msg']]);
+      expect(said).toEqual(
+        expect.arrayContaining([
+          [
+            50,
+            'dictation',
+            expect.stringMatching(
+              /^voice: Dictation needs a Deepgram key on .+\. Set it up in Settings → Providers\. Its sessions will be refused\.$/,
+            ),
+          ],
+          [
+            50,
+            'call',
+            expect.stringMatching(
+              /^voice: Calls need an OpenAI key on .+\. Set it up in Settings → Providers\. Its sessions will be refused\.$/,
+            ),
+          ],
         ]),
-      ]);
+      );
 
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.host' && e.hostId === 'd1');
       const host = boot.fakeServer.received.find((e) => e.type === 'host.host');
@@ -4557,9 +4560,9 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
         {
           type: 'audio.error',
           code: 'voice_key_missing',
-          message:
-            'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-            'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.',
+          message: expect.stringMatching(
+            /^Dictation needs a Deepgram key on .+\. Set it up in Settings → Providers\.$/,
+          ),
         },
       ]);
     } finally {
@@ -4919,9 +4922,7 @@ describe('handleVoiceNoteTranscribe', () => {
       ok: false,
       error: {
         code: 'voice_key_missing',
-        message:
-          'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-          'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.',
+        message: 'Dictation needs a Deepgram key on this host. Set it up in Settings → Providers.',
       },
     });
     expect(local).not.toHaveBeenCalled();

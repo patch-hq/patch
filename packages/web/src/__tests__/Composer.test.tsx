@@ -1931,9 +1931,7 @@ describe('Composer', () => {
       );
       const mic = screen.getByTestId('voice-note-btn') as HTMLButtonElement;
       expect(mic.disabled).toBe(true);
-      expect(mic.getAttribute('title')).toBe(
-        'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
-      );
+      expect(mic.getAttribute('title')).toBe('Dictation needs a Deepgram key on hetzner.');
       fireEvent.mouseDown(mic);
       fireEvent.mouseUp(mic);
       expect(onStartVoiceNote).not.toHaveBeenCalled();

@@ -76,6 +76,7 @@ describe('Claude on Amazon Bedrock accounts (spec/10 § Backend credentials)', (
       runsManager: false,
       backends: [],
       components: [],
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       voiceKeys: { gemini: false, openai: false, groq: false },
     };

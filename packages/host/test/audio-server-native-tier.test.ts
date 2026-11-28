@@ -351,9 +351,7 @@ describe('audio server — voice config matrix selection', () => {
     expect(msg.type).toBe('audio.error');
     expect(msg).toMatchObject({
       code: 'voice_key_missing',
-      message:
-        'Call is set to gemini, but no Gemini key is set on this host. ' +
-        'Add it in Settings → Providers, or switch Call to another backend in Settings → Voice.',
+      message: 'Calls need a Gemini key on this host. Set it up in Settings → Providers.',
     });
     expect(instances.length).toBe(0);
     ws.close();
@@ -384,9 +382,7 @@ describe('audio server — voice config matrix selection', () => {
     expect(msg.type).toBe('audio.error');
     expect(msg).toMatchObject({
       code: 'voice_key_missing',
-      message:
-        'Call is set to openai, but no OpenAI key is set on this host. ' +
-        'Add it in Settings → Providers, or switch Call to another backend in Settings → Voice.',
+      message: 'Calls need an OpenAI key on this host. Set it up in Settings → Providers.',
     });
     expect(instances.length).toBe(0);
     ws.close();

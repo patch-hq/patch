@@ -3095,6 +3095,7 @@ usePresenceStore.getState().setHosts([
       // spec/02 § Provider keys — one of each state, so Settings → Hosts →
       // Keys can be seen and exercised without a host.
       voiceKeys: { gemini: false, openai: false, groq: false, deepgram: false, elevenlabs: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       providerKeys: [
         { id: 'gemini', source: 'none', envSet: false },

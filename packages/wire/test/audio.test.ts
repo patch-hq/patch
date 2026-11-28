@@ -7,9 +7,6 @@ import {
   encodeAudio,
   validateDeviceIdCoupling,
   DEFAULT_VOICE_AGENT,
-  voiceKeyMissingMessage,
-  voiceSurfacesMissingKey,
-  voiceKeyHostStatus,
   DEFAULT_VOICE_CONFIG,
   DictationSetting,
   dictationEngineFor,
@@ -294,78 +291,6 @@ describe('speech to text setting', () => {
   });
 });
 
-describe('a voice surface whose backend has no key on the host', () => {
-  const config = {
-    dictation: { phone: 'deepgram' as const, computer: 'whisper' as const, tidy: false },
-    meeting: 'local' as const,
-    deviceAnswer: 'agent',
-  };
-  test('the refusal names the surface, the key and the Settings → Voice fix', () => {
-    expect(voiceKeyMissingMessage('dictation', 'gemini')).toBe(
-      'Dictation is set to gemini, but no Gemini key is set on this host. ' +
-        'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.',
-    );
-    expect(voiceKeyMissingMessage('hands-free', 'openai')).toBe(
-      'Hands-free is set to openai, but no OpenAI key is set on this host. ' +
-        'Add it in Settings → Providers, or switch Hands-free to another backend in Settings → Voice.',
-    );
-  });
-  test('lists every surface on a provider the host has no key for, and only those', () => {
-    // The device answers on the voice agent, here on OpenAI; calls and hands-free do too.
-    const agent = { ...DEFAULT_VOICE_AGENT, provider: 'openai' as const };
-    const openai = { backend: 'openai', env: 'OPENAI_REALTIME_API_KEY' };
-    expect(voiceSurfacesMissingKey(config, agent, { gemini: false, openai: false })).toEqual([
-      { surface: 'dictation', backend: 'deepgram', env: 'DEEPGRAM_API_KEY' },
-      { surface: 'device', ...openai },
-      { surface: 'hands-free', ...openai },
-      { surface: 'call', ...openai },
-    ]);
-    expect(
-      voiceSurfacesMissingKey(config, agent, { gemini: false, openai: true, deepgram: true }),
-    ).toEqual([]);
-    // A device answering directly needs no provider key; the agent's does.
-    expect(
-      voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, DEFAULT_VOICE_AGENT, {
-        gemini: true,
-        openai: false,
-      }),
-    ).toEqual([]);
-  });
-  test('Settings names each host that cannot run a hosted cell; unreported hosts say nothing', () => {
-    const hosts = [
-      { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false } },
-      { hostName: 'mac', voiceKeys: { gemini: true, openai: false } },
-      { hostName: 'old-daemon' },
-    ];
-    expect(voiceKeyHostStatus('gemini', hosts)).toBe(
-      'Not configured on hetzner: no Gemini key is set. Sessions there are refused.',
-    );
-    expect(voiceKeyHostStatus('openai', hosts)).toBe(
-      'Not configured on hetzner, mac: no OpenAI key is set. Sessions there are refused.',
-    );
-    expect(voiceKeyHostStatus('local', hosts)).toBeNull();
-    // Neither the phone's recogniser nor the host's Whisper needs a key.
-    expect(voiceKeyHostStatus('device', hosts)).toBeNull();
-    expect(voiceKeyHostStatus('whisper', hosts)).toBeNull();
-    expect(voiceKeyHostStatus('deepgram', hosts)).toBe(
-      'Not configured on hetzner, mac: no Deepgram key is set. Sessions there are refused.',
-    );
-    expect(
-      voiceKeyHostStatus('gemini', [
-        { hostName: 'mac', voiceKeys: { gemini: true, openai: true } },
-      ]),
-    ).toBeNull();
-  });
-  test('audio.error carries voice_key_missing', () => {
-    const ev = {
-      type: 'audio.error' as const,
-      code: 'voice_key_missing' as const,
-      message: voiceKeyMissingMessage('call', 'openai'),
-    };
-    expect(decodeAudio(encodeAudio(ev))).toEqual(ev);
-  });
-});
-
 describe('the dictation setting (spec/07 § Dictation engines)', () => {
   test('the phone app runs the phone engine; web and desktop run the computer one', () => {
     const d = { phone: 'device', computer: 'deepgram', tidy: true } as const;
@@ -416,27 +341,9 @@ describe('the dictation setting (spec/07 § Dictation engines)', () => {
 
 describe('meeting engine', () => {
   test('is part of the voice config and defaults to local', async () => {
-    const { DEFAULT_VOICE_CONFIG, MeetingEngine, voiceSurfacesMissingKey } =
-      await import('../src/audio.js');
+    const { DEFAULT_VOICE_CONFIG, MeetingEngine } = await import('../src/audio.js');
     expect(DEFAULT_VOICE_CONFIG.meeting).toBe('local');
     expect(MeetingEngine.options).toEqual(['local', 'elevenlabs', 'deepgram', 'assemblyai']);
-    const { DEFAULT_VOICE_AGENT } = await import('../src/audio.js');
-    const keys = { gemini: true, openai: false };
-    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, DEFAULT_VOICE_AGENT, keys)).toEqual([]);
-    expect(
-      voiceSurfacesMissingKey(
-        { ...DEFAULT_VOICE_CONFIG, meeting: 'assemblyai' },
-        DEFAULT_VOICE_AGENT,
-        keys,
-      ),
-    ).toEqual([{ surface: 'meeting', backend: 'assemblyai', env: 'ASSEMBLYAI_API_KEY' }]);
-    expect(
-      voiceSurfacesMissingKey(
-        { ...DEFAULT_VOICE_CONFIG, meeting: 'assemblyai' },
-        DEFAULT_VOICE_AGENT,
-        { ...keys, assemblyai: true },
-      ),
-    ).toEqual([]);
   });
 });
 

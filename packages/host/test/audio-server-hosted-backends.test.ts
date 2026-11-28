@@ -435,14 +435,12 @@ describe('audio server — hosted backends on every app surface', () => {
       const s = await start({}, { gemini: true }, on('openai'));
       const surface = await openSurface(s.port, `o-nokey-${mode}`, 'voice-call', mode);
       await surface.closed;
-      const label = mode === 'call' ? 'Call' : 'Hands-free';
+      const label = mode === 'call' ? 'Calls need' : 'Hands-free needs';
       expect(surface.events).toEqual([
         {
           type: 'audio.error',
           code: 'voice_key_missing',
-          message:
-            `${label} is set to openai, but no OpenAI key is set on this host. ` +
-            `Add it in Settings → Providers, or switch ${label} to another backend in Settings → Voice.`,
+          message: `${label} an OpenAI key on this host. Set it up in Settings → Providers.`,
         },
       ]);
       expect(openai).toHaveLength(0);
@@ -452,14 +450,12 @@ describe('audio server — hosted backends on every app surface', () => {
       const s = await start({}, undefined, on('elevenlabs'));
       const surface = await openSurface(s.port, `e-nokey-${mode}`, 'voice-call', mode);
       await surface.closed;
-      const label = mode === 'call' ? 'Call' : 'Hands-free';
+      const label = mode === 'call' ? 'Calls need' : 'Hands-free needs';
       expect(surface.events).toEqual([
         {
           type: 'audio.error',
           code: 'voice_key_missing',
-          message:
-            `${label} is set to elevenlabs, but no ElevenLabs key is set on this host. ` +
-            `Add it in Settings → Providers, or switch ${label} to another backend in Settings → Voice.`,
+          message: `${label} an ElevenLabs key on this host. Set it up in Settings → Providers.`,
         },
       ]);
       expect(eleven).toHaveLength(0);

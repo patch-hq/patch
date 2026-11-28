@@ -145,6 +145,8 @@ describe("audio relay: /audio/:sessionId routes to the session's own host", () =
     // whatever is subscribed at the moment it is called.
     hostLink.emit({
       type: 'host.host',
+      voiceKeys: { gemini: false, openai: false, groq: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       hostId: HOST_ID,
       hostName: 'Mac',
@@ -366,6 +368,8 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     // any host that isn't co-located with the server (config.ts).
     hostLink.emit({
       type: 'host.host',
+      voiceKeys: { gemini: false, openai: false, groq: false },
+      voiceLocal: { whisper: false, parakeet: false, kokoro: false },
       voiceCatalog: {},
       hostId: HOST_ID,
       hostName: 'Tom’s MacBook Pro',

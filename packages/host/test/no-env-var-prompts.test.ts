@@ -5,7 +5,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { voiceKeyHostStatus, voiceKeyMissingMessage } from '@patch/wire/audio';
+import { engineSetupLine, keyMissingGap, refusalMessage } from '@patch/wire/audio';
 
 const ENV_NAME = /\b[A-Z][A-Z0-9]*_(?:API_)?(?:KEY|TOKEN)\b|\.env\b|env var/i;
 // An env name read as `env['X']` is configuration plumbing, not a message.
@@ -25,14 +25,21 @@ function stringLiterals(source: string): string[] {
 
 describe('no env-var prompts', () => {
   test('the missing-key sentences name Settings → Providers, never an env var', () => {
+    const gap = (
+      feature: Parameters<typeof keyMissingGap>[0],
+      p: 'deepgram' | 'gemini' | 'openai',
+    ) => refusalMessage(keyMissingGap(feature, p, 'hetzner'));
     const messages = [
-      voiceKeyMissingMessage('dictation', 'deepgram'),
-      voiceKeyMissingMessage('call', 'gemini'),
-      voiceKeyMissingMessage('hands-free', 'openai'),
+      gap({ feature: 'dictation', engine: 'deepgram' }, 'deepgram'),
+      gap({ feature: 'call', surface: 'call' }, 'gemini'),
+      gap({ feature: 'call', surface: 'hands-free' }, 'openai'),
       ...(['gemini', 'openai', 'deepgram'] as const).map(
         (b) =>
-          voiceKeyHostStatus(b, [
-            { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false, deepgram: false } },
+          engineSetupLine({ kind: 'key', provider: b, role: 'agent' }, [
+            {
+              hostName: 'hetzner',
+              voiceKeys: { gemini: false, openai: false, groq: false, deepgram: false },
+            },
           ]) ?? '',
       ),
     ];
@@ -40,7 +47,7 @@ describe('no env-var prompts', () => {
       expect(m).not.toMatch(ENV_NAME);
       expect(m.length).toBeGreaterThan(0);
     }
-    expect(voiceKeyMissingMessage('dictation', 'deepgram')).toContain('Settings → Providers');
+    expect(messages[0]).toContain('Settings → Providers');
   });
 
   test('no string in the audio sources asks for an env var', () => {

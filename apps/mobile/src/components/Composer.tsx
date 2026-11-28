@@ -171,7 +171,7 @@ import { dictationEngineFor } from '../lib/dictationEngine';
 import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
 import { markDictatedSend } from '../lib/dictatedSends';
 import { useMicLevelStore } from '../stores/micLevelStore';
-import { voiceKeyRefusal } from '../lib/voiceKeys';
+import { ensureDictationReady } from '../lib/voiceReadiness';
 import { usePresenceStore } from '../stores/presenceStore';
 import { accountsOutage } from '../lib/usage';
 import { hostControlsDisabled, hostControlDisabledReason } from '../lib/connection';
@@ -1052,11 +1052,7 @@ export function Composer({
     // Dictation on a backend this chat's host has no key for is refused at the
     // press, not after the user has spoken (the host refuses it too). The
     // phone's recogniser needs no key.
-    const refusal = engine === 'phone' ? null : voiceKeyRefusal(chatId, 'dictation');
-    if (refusal !== null) {
-      useUiStore.getState().pushError(`voice: ${refusal}`);
-      return;
-    }
+    if (engine !== 'phone' && !ensureDictationReady(chatId)) return;
     discardedRef.current = false;
     dictationEpochRef.current += 1;
     // Dictating is talking, not typing: put the keyboard away so the listening
@@ -1212,11 +1208,7 @@ export function Composer({
         });
       return;
     }
-    const refusal = voiceKeyRefusal(chatId, 'dictation');
-    if (refusal !== null) {
-      useUiStore.getState().pushError(`voice: ${refusal}`);
-      return;
-    }
+    if (!ensureDictationReady(chatId)) return;
     const prefs = useSettingsStore.getState().data!.preferences;
     Keyboard.dismiss();
     inputRef.current?.blur();
