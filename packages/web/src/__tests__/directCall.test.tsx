@@ -15,7 +15,6 @@ import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore, type HostPresence } from '../stores/presenceStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { NOT_SET_UP } from '@patch/wire/direct-call';
 import { VoiceBar } from '../components/VoiceBar.js';
 import { endVoiceCall } from '../lib/voiceController.js';
 import { startDirectCall, directCallActive, directCallLine } from '../lib/direct/directCall.js';
