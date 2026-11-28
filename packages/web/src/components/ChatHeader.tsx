@@ -15,6 +15,7 @@
 // into a menu rather than scroll/shrink). Both renderings call the exact same
 // handlers defined below — no logic is duplicated, only the JSX shape.
 
+import { ReachSwitch } from './ReachSwitch.js';
 import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -544,6 +545,8 @@ export function ChatHeader({
                 <Settings size={16} aria-hidden />
               </button>
             ) : null}
+            {/* spec/09 § Reaching the user — flipped for an hour or two, so it sits on the Manager, not in Settings. */}
+            {row.chatId === SPECIAL_THREAD_IDS.manager ? <ReachSwitch /> : null}
           </div>
         </div>
 

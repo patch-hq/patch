@@ -118,7 +118,7 @@ A call demands attention in a way a notification doesn't, so agents reach for it
 
 ## Reaching the user
 
-How Patch is allowed to reach the user when no voice session is open is one account-wide setting with two values, set from the phone's Voice tab (`15-design-mobile.md` § Voice tab (Manager)) and left alone for hours at a time:
+How Patch is allowed to reach the user when no voice session is open is one account-wide setting with two values, set from the Notify switch in the Manager view's header on the web (`14-design-web.md` § Manager view) and the phone's Voice tab (`15-design-mobile.md` § Voice tab (Manager)) and left alone for hours at a time:
 
 | Reach         | What it does                                                             | Good for                                          |
 | ------------- | ------------------------------------------------------------------------ | ------------------------------------------------- |
