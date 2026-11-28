@@ -114,7 +114,7 @@ describe('the Manager prompt on an ACP agent', () => {
     const notes = (): string[] =>
       systemLines(t.events).filter((l) => l.startsWith('Manager prompt not applied'));
     await turn(t, manager, 'acp-gemini-r-one');
-    expect(notes()).toEqual(['Manager prompt not applied · gemini takes no system prompt']);
+    expect(notes()).toEqual(['Manager prompt not applied · ACP agent takes no system prompt']);
     await turn(t, manager, 'acp-gemini-r-one').catch(() => undefined);
     expect(notes()).toHaveLength(1);
     // A fresh session is told again.

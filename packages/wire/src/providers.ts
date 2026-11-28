@@ -40,6 +40,11 @@ export interface ProviderCapabilities {
   readonly interrupt: boolean;
   /** Add input to a turn that is already running. */
   readonly steer: boolean;
+  /**
+   * Take text appended to its system prompt: the patch-tools guidance and the
+   * Manager prompt (spec/06 § Manager prompt and folder).
+   */
+  readonly systemPrompt: boolean;
 }
 
 export type ProviderCapability = keyof ProviderCapabilities;
@@ -201,6 +206,7 @@ export const PROVIDERS = [
       interrupt: true,
       // The Agent SDK's PostToolBatch hook hands waiting input to the agent at a tool boundary.
       steer: true,
+      systemPrompt: true,
     },
     settings: [
       {
@@ -267,6 +273,8 @@ export const PROVIDERS = [
       disableNativeTools: false,
       interrupt: true,
       steer: true,
+      // As developer instructions.
+      systemPrompt: true,
     },
     // ChatGPT has no setting that deletes or expires its own sessions: it keeps
     // every session until one is deleted (`codex delete`). What its own
@@ -338,6 +346,8 @@ export const PROVIDERS = [
       disableNativeTools: false,
       interrupt: true,
       steer: false,
+      // ACP has no system prompt to append to.
+      systemPrompt: false,
     },
     settings: [],
     ownSettingsReportedByHost: false,

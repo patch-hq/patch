@@ -203,8 +203,8 @@ turns, translates the provider's events into entries of the chat's record (each
 carrying the provider's own message or turn id, `nativeRef`), reports the state
 of the accounts it runs on (`10-auth.md`), and supplies the models it can run and
 the permission modes it accepts. It also declares its capabilities: resume, edit
-or rewind at a message, branch at a turn, switch off native tools, interrupt, and
-steer. Features follow those declarations (`principles.md`): a feature whose
+or rewind at a message, branch at a turn, switch off native tools, interrupt,
+steer, and take an appended system prompt (`systemPrompt`). Features follow those declarations (`principles.md`): a feature whose
 capability an adapter does not declare is absent for its chats. Surfaces do not
 offer it, and the host refuses a request for it with `capability_unsupported`
 (a `chat.error`, or a 409 from the CLI and agent tools) rather than doing a
@@ -212,7 +212,9 @@ lesser version: an edit without `editAtMessage`, a side thread without
 `branchAtTurn`, Stop or send now without `interrupt`, a turn on the provider's
 saved session without `resume`. Without `steer` nothing is handed into a running
 turn at a tool boundary; a queued message waits for the turn to end and its chip
-says `end of turn`. No feature uses `rewind` yet. Adding or
+says `end of turn`. Without `systemPrompt` the patch-tools guidance and the
+Manager prompt are not given, and the Manager's thread says so once per
+session (`06-threads-manager-speakers.md` § Manager prompt and folder). No feature uses `rewind` yet. Adding or
 removing a provider is adding or removing its adapter; nothing outside the
 adapters branches on a provider by name. A chat's model selects its provider, a
 chat never changes provider (`04-chats-and-folders.md` § Provider switches), and
@@ -354,7 +356,7 @@ was last sent in memory and asks the agent again when they change.
   option. A stop is `session/cancel`; an agent that has not finished 15 seconds
   later is ended.
 - Declared capabilities: interrupt always, resume where the agent advertises
-  load or resume. ACP has no edit, rewind, branch, steer or native-tool switch,
+  load or resume. ACP has no edit, rewind, branch, steer, system prompt or native-tool switch,
   so those are absent, and so are `auto` and `plan` modes. A chat on an agent
   that cannot reopen a session cannot continue after its first turn; it says so
   and stays readable. A switched-off Patch tool is left out of Patch's MCP
