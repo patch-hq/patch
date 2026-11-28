@@ -134,3 +134,26 @@ describe('ArtifactPane', () => {
     expect(post).toHaveBeenCalledWith({ type: 'patch:artifact-go', dir: 'back' }, '*');
   });
 });
+
+describe('artifact new window', () => {
+  it('the artifact tab has an Open in new window button', async () => {
+    const mod = await import('../lib/newWindow.js');
+    const spy = vi.spyOn(mod, 'openTabInNewWindow').mockImplementation(() => {});
+    render(<ArtifactPane chatId={chatId} artifactId="abc" url={url} />);
+    fireEvent.click(screen.getByTestId('artifact-pane-new-window'));
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'page', page: 'artifact', chatId, artifactId: 'abc' }),
+    );
+    spy.mockRestore();
+  });
+
+  it('artifactDescriptor names the artifact tab, or the Pad page for a Pad card', async () => {
+    const { artifactDescriptor } = await import('../lib/openArtifact.js');
+    expect(artifactDescriptor(url, chatId)).toMatchObject({ page: 'artifact', artifactId: 'abc' });
+    expect(artifactDescriptor('/pads/p1', chatId)).toEqual({
+      kind: 'page',
+      page: 'pad',
+      padId: 'p1',
+    });
+  });
+});

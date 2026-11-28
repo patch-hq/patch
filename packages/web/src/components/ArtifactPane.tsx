@@ -9,9 +9,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { ArrowLeft, ArrowRight, ExternalLink, RotateCw } from 'lucide-react';
+import { AppWindow, ArrowLeft, ArrowRight, ExternalLink, RotateCw } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { onArtifactRefresh } from '../lib/artifactRefresh.js';
+import { openTabInNewWindow } from '../lib/newWindow.js';
 
 export function ArtifactPane({
   chatId,
@@ -98,6 +99,18 @@ export function ArtifactPane({
           <span className="artifact-pane-title">{entry?.artifactTitle ?? 'Artifact'}</span>
           <span className="artifact-pane-file">{entry?.artifactPath ?? ''}</span>
         </div>
+        <button
+          type="button"
+          className="artifact-pane-btn"
+          aria-label="Open in new window"
+          title="Open in new window"
+          data-testid="artifact-pane-new-window"
+          onClick={() =>
+            openTabInNewWindow({ kind: 'page', page: 'artifact', chatId, artifactId, url: href })
+          }
+        >
+          <AppWindow size={14} aria-hidden />
+        </button>
         <button
           type="button"
           className="artifact-pane-btn"

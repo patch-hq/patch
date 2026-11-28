@@ -21,7 +21,7 @@ import {
 } from 'react';
 import { useMarkChatNotificationsRead } from '../stores/notificationsStore.js';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { OpenableLink } from '../components/OpenableLink.js';
+import { OpenableButton, OpenableLink } from '../components/OpenableLink.js';
 import { RemoteCallBanner } from '../components/RemoteCallBanner.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { railMarkers, nextFarState, isFar, type FarState } from '../lib/scrollRail.js';
@@ -152,7 +152,7 @@ import {
   ownThreadEvents,
 } from '../lib/sideThreadActions.js';
 import { openDiffForFile } from '../lib/openDiff.js';
-import { openArtifact } from '../lib/openArtifact.js';
+import { artifactDescriptor, openArtifact } from '../lib/openArtifact.js';
 import { PadCard, padIdOfArtifact } from '../components/PadCard.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
@@ -4261,16 +4261,16 @@ function ArtifactCard({ entry, chatId }: { entry: ChatEventEntry; chatId: string
   }
   const url = entry.artifactUrl ?? '';
   return (
-    <button
-      type="button"
+    <OpenableButton
+      opens={artifactDescriptor(url, chatId)}
       className="artifact-card"
       data-testid="artifact-card"
-      onClick={() => openArtifact(url, chatId)}
+      onOpen={() => openArtifact(url, chatId)}
     >
       <LayoutTemplate size={16} aria-hidden />
       <span className="artifact-title">{entry.artifactTitle}</span>
       <span className="artifact-path">{entry.artifactPath}</span>
-    </button>
+    </OpenableButton>
   );
 }
 
