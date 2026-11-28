@@ -1430,12 +1430,58 @@ describe('chat REST routes', () => {
     }
   });
 
+  const hostReport = (managerClear: boolean) =>
+    ({
+      type: 'host.host',
+      hostId: 'd1',
+      hostName: 'Box',
+      platform: 'linux',
+      arch: 'x64',
+      hostVersion: '1.0.0',
+      updateAvailable: false,
+      permissionModeDefault: 'auto',
+      permissionOverrides: 0,
+      runsManager: true,
+      ...(managerClear ? { managerClear: true } : {}),
+      backends: [],
+      components: [],
+    }) as never;
+
+  it('POST /api/chats/:id/rotate {carry:false} on a host too old for Clear is refused, naming it', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit(hostReport(false));
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'thread_manager', folder: '/m' });
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/thread_manager/rotate',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { carry: false },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toMatch(/needs updating to clear the Manager$/);
+      expect(hostLink.sent.some((s) => s.event.type === 'chat.rotate_request')).toBe(false);
+      // A rotation with carry-over is one any host takes.
+      const rotate = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/thread_manager/rotate',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(rotate.statusCode).toBe(200);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('POST /api/chats/:id/rotate {carry:false} is Clear: the request says so, and a bad carry is refused', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
     const built = await makeApp({ registry, hostLink });
     try {
       hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'thread_manager', folder: '/m' });
+      hostLink.emit(hostReport(true));
       const res = await built.app.inject({
         method: 'POST',
         url: '/api/chats/thread_manager/rotate',

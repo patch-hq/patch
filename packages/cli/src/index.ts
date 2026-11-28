@@ -204,8 +204,9 @@ const isTuiMode = cmdName === undefined || cmdName.startsWith('-') || TUI_MODE_V
 program.parseAsync(process.argv).then(
   () => {
     if (!isTuiMode) {
-      // Flush stdout then exit (avoids Undici keepalive socket pinning).
-      process.stdout.write('', () => process.exit(0));
+      // Flush stdout then exit (avoids Undici keepalive socket pinning),
+      // keeping a failure a command reported through `process.exitCode`.
+      process.stdout.write('', () => process.exit(process.exitCode ?? 0));
     }
   },
   (err: Error) => {

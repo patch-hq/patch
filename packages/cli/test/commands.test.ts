@@ -676,18 +676,59 @@ test('"help" is commander\'s built-in command, not an unknown one', async () => 
   );
 });
 
-test('threads send-finished posts to the server and says whether anything went', async () => {
-  const seen: string[] = [];
+test('threads send-finished names what happened: nothing waiting, in flight, sent, refused', async () => {
+  const cases: [object, number, RegExp][] = [
+    [{ sent: false, outcome: 'nothing-waiting' }, 0, /^nothing waiting$/m],
+    [
+      { sent: false, outcome: 'in-flight', chats: 2 },
+      0,
+      /a delivery of 2 chats is already in flight/,
+    ],
+    [{ sent: true, outcome: 'sent', chats: 1 }, 0, /sent 1 chat to the Manager/],
+    [
+      {
+        sent: false,
+        outcome: 'refused',
+        reason: 'Manager host Box needs updating for finished chats',
+      },
+      1,
+      /refused: Manager host Box needs updating for finished chats/,
+    ],
+    // A server from before the outcomes.
+    [{ sent: false }, 0, /nothing sent/],
+  ];
+  for (const [body, code, out] of cases) {
+    const seen: string[] = [];
+    await withSetup(
+      (req) => {
+        seen.push(`${req.method} ${req.url}`);
+        return { status: 200, body };
+      },
+      async (env) => {
+        const r = await runCli(['threads', 'send-finished'], env);
+        assert.equal(r.code, code, `stdout=${r.stdout} stderr=${r.stderr}`);
+        assert.match(r.stdout, out);
+        assert.ok(seen.includes('POST /api/manager/finished/send-now'), seen.join(', '));
+        const j = await runCli(['threads', 'send-finished', '--json'], env);
+        assert.deepEqual(JSON.parse(j.stdout), body);
+      },
+    );
+  }
+});
+
+test('threads finished --json reads what is waiting and the last delivery', async () => {
+  const body = { waiting: 2, sending: 0, lastSent: { at: 1_700_000_000_000, chats: 3 } };
   await withSetup(
-    (req) => {
-      seen.push(`${req.method} ${req.url}`);
-      return { status: 200, body: { sent: false } };
-    },
+    (req) =>
+      req.method === 'GET' && req.url === '/api/manager/finished'
+        ? { status: 200, body }
+        : { status: 404, body: {} },
     async (env) => {
-      const r = await runCli(['threads', 'send-finished'], env);
-      assert.equal(r.code, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
-      assert.match(r.stdout, /nothing finished — nothing sent/);
-      assert.ok(seen.includes('POST /api/manager/finished/send-now'), seen.join(', '));
+      const j = await runCli(['threads', 'finished', '--json'], env);
+      assert.equal(j.code, 0, `stdout=${j.stdout} stderr=${j.stderr}`);
+      assert.deepEqual(JSON.parse(j.stdout), body);
+      const r = await runCli(['threads', 'finished'], env);
+      assert.match(r.stdout, /^2 waiting · last sent /);
     },
   );
 });

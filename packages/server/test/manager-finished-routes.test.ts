@@ -40,7 +40,7 @@ describe('manager finished-chats REST routes', () => {
     return { jwt, built };
   }
 
-  it('POST /api/manager/finished/send-now reports sent:false with nothing finished', async () => {
+  it('POST /api/manager/finished/send-now says why nothing went: finished chats are off by default', async () => {
     const { jwt, built } = await bootstrap();
     try {
       const res = await built.app.inject({
@@ -49,7 +49,28 @@ describe('manager finished-chats REST routes', () => {
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ sent: false });
+      expect(res.json()).toEqual({
+        sent: false,
+        outcome: 'refused',
+        reason: 'finished chats are off',
+      });
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('GET /api/manager/finished reports what is waiting and the last delivery', async () => {
+    const { jwt, built } = await bootstrap();
+    try {
+      const res = await built.app.inject({
+        method: 'GET',
+        url: '/api/manager/finished',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ waiting: 0, sending: 0, lastSent: null });
+      const anon = await built.app.inject({ method: 'GET', url: '/api/manager/finished' });
+      expect(anon.statusCode).toBe(401);
     } finally {
       await built.app.close();
     }

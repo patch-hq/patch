@@ -45,6 +45,7 @@ import {
 import { createClaudeSessionProbe } from '../../../host/src/history.js';
 import { createServerLink, type ServerLink } from '../../../host/src/serverLink.js';
 import { Outbox } from '../../../host/src/outbox.js';
+import { describeHost } from '../../../host/src/host.js';
 import { ensureSpecialThreads } from '../../../host/src/specialThreads.js';
 // J1: the REAL host files handler (server↔host file-content round-trip was
 // previously untested end-to-end — see files.e2e.test.ts). `handleFileOpRequest`
@@ -318,6 +319,24 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
           const stateEvent = hostDaemon.currentStateEvent(state.chatId);
           if (stateEvent) send(stateEvent);
         }
+        // Mirror index.ts's self-description, for the capabilities the server
+        // gates frames on (spec/03 § host.host).
+        send(
+          describeHost({
+            hostId: id,
+            hostName: id,
+            hostVersion: '1',
+            updateAvailable: false,
+            permissionModeDefault: 'default',
+            permissionOverrides: 0,
+            runsManager: opts.specialThreads === true && id === hostId,
+            managerFinished: true,
+            managerClear: true,
+            backends: [],
+            components: [],
+            voiceCatalog: {},
+          }),
+        );
         // …and closes the burst with folders.list, which is what tells the
         // server this host's chat list is complete (unknown-chat.ts).
         send({ type: 'folders.list', hostId: id, roots: [], recent: [] });

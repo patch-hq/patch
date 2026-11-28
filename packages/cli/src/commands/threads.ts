@@ -5,6 +5,7 @@
 // spec/06. send-to is identical to `chats send-to`, but resolved by name.
 
 import { Command } from 'commander';
+import { finishedStatusLine, type ManagerFinishedStatus } from '@patch/wire';
 import type { CommonOpts } from './_common.js';
 import { accountChatsPath, emitJson, emitText, getTransport, run } from './_common.js';
 
@@ -68,7 +69,20 @@ export function registerThreadsCommands(program: Command): void {
 
   // Finished chats → the Manager (spec/06 § Finished chats) — account-wide,
   // server-owned state with no local UDS equivalent: nothing a host can answer
-  // on its own, so this always goes straight to the server (`remote: true`).
+  // on its own, so these always go straight to the server (`remote: true`).
+  threads
+    .command('finished')
+    .description('Show the chats waiting for the Manager and the last delivery')
+    .option('--json', 'JSON output')
+    .action(async (opts: CommonOpts) => {
+      await run(opts, async () => {
+        const t = getTransport({ ...opts, remote: true });
+        const res = await t.get<ManagerFinishedStatus>('/api/manager/finished');
+        if (opts.json) emitJson(res);
+        else emitText(finishedStatusLine(res));
+      });
+    });
+
   threads
     .command('send-finished')
     .description('Deliver the chats finished so far to the Manager now (spec/06 § Finished chats)')
@@ -76,9 +90,37 @@ export function registerThreadsCommands(program: Command): void {
     .action(async (opts: CommonOpts) => {
       await run(opts, async () => {
         const t = getTransport({ ...opts, remote: true });
-        const res = await t.post<{ sent: boolean }>('/api/manager/finished/send-now', {});
+        const res = await t.post<SendFinishedResult>('/api/manager/finished/send-now', {});
         if (opts.json) emitJson(res);
-        else emitText(res.sent ? 'sent to the Manager' : 'nothing finished — nothing sent');
+        else emitText(sendFinishedLine(res));
+        // Refused is a failure the caller must see, not a quiet success.
+        if (res.outcome === 'refused') process.exitCode = 1;
       });
     });
+}
+
+export type SendFinishedResult = { sent: boolean } &
+  // A server from before the outcomes says only whether something went.
+  (| { outcome?: undefined }
+    | { outcome: 'nothing-waiting' }
+    | { outcome: 'in-flight'; chats: number }
+    | { outcome: 'sent'; chats: number }
+    | { outcome: 'refused'; reason: string }
+  );
+
+const chatsWord = (n: number): string => `${n} chat${n === 1 ? '' : 's'}`;
+
+export function sendFinishedLine(res: SendFinishedResult): string {
+  switch (res.outcome) {
+    case undefined:
+      return res.sent ? 'sent to the Manager' : 'nothing sent';
+    case 'nothing-waiting':
+      return 'nothing waiting';
+    case 'in-flight':
+      return `a delivery of ${chatsWord(res.chats)} is already in flight`;
+    case 'sent':
+      return `sent ${chatsWord(res.chats)} to the Manager`;
+    case 'refused':
+      return `refused: ${res.reason}`;
+  }
 }

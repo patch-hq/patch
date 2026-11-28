@@ -2054,6 +2054,17 @@ export class WsHub {
     return this.lastHostReport.get(hostId)?.limitFacts === true;
   }
 
+  /** Does this host take `manager.finished_run`? Undefined until it has described itself. */
+  hostManagerFinished(hostId: string): boolean | undefined {
+    const report = this.lastHostReport.get(hostId);
+    return report === undefined ? undefined : report.managerFinished === true;
+  }
+
+  /** Does this host honour Clear (`chat.rotate_request.carry: false`)? */
+  hostManagerClear(hostId: string): boolean {
+    return this.lastHostReport.get(hostId)?.managerClear === true;
+  }
+
   /** Does this host say it takes queued messages from the server? */
   hostServerQueue(hostId: string): boolean {
     return this.lastHostReport.get(hostId)?.serverQueue === true;

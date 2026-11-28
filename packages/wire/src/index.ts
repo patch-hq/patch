@@ -209,6 +209,7 @@ export * from './tool-runs.js';
 export * from './chat-move.js';
 export * from './sweep-prompt.js';
 export * from './manager-prompt.js';
+export * from './manager-finished.js';
 export * from './thread-rows.js';
 export * from './manager-voice-prompt.js';
 export * from './voice-instructions.js';

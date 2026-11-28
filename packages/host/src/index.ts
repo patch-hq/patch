@@ -1574,6 +1574,9 @@ async function startHost(
       limitFacts: true,
       // An ACP agent's own sign-in can be run here (spec/10 § Signing in).
       acpLogin: true,
+      // Finished chats and Clear reach the Manager here (spec/06).
+      managerFinished: true,
+      managerClear: true,
       audioRelayHost: config.audio.relayHost,
       backends: [
         {
