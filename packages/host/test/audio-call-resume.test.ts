@@ -148,16 +148,17 @@ async function dial(sessionId: string, resumes?: string): Promise<Device> {
   return device;
 }
 
-/** The device stops answering for `ms`: the host judges the line lost and holds the call. */
+/** The device's connection drops and it is gone for `ms`: the host holds the call. */
 async function stall(device: Device, ms: number): Promise<void> {
-  await vi.advanceTimersByTimeAsync(ms);
+  device.ws.terminate();
   await io(() => device.closed);
+  await vi.advanceTimersByTimeAsync(ms);
   expect(device.closed).toBe(true);
 }
 
 describe('a dropped call is held and resumed', () => {
   test.each([5_000, 20_000])(
-    'a %i ms silence keeps the session, and the redial resumes it with the answer owed',
+    'a %i ms drop keeps the session, and the redial resumes it with the answer owed',
     async (silenceMs) => {
       await start();
       const first = await dial('s1');
@@ -190,8 +191,9 @@ describe('a dropped call is held and resumed', () => {
       expect(geminis[0]!.said('milk added')).toBe(true);
       expect(ended).toEqual([]);
 
-      // The resumed connection is the session's line: it is heartbeated and ends the call on session_end.
-      second.ws.send(encodeAudio({ type: 'audio.session_end' }));
+      // The resumed connection is the session's line: it is heartbeated, and the call
+      // ends when the server tells the host (spec/07 § Ending a call).
+      server!.endSession('s1');
       await io(() => ended.length > 0);
       expect(ended).toEqual(['s1']);
       expect(server!.sessionById('s1')).toBeUndefined();
