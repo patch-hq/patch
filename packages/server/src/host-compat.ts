@@ -17,11 +17,12 @@
  * that makes a wire frame's new shape mandatory rather than additive — that is
  * the moment older hosts stop being able to hold up their end.
  */
-// 1.1.2190 is the first host whose `patch.send_to` carries the `localId` the
-// message is delivered under, and that asks for a sent message's reply with
-// `patch.reply.request` (spec/03 § Cross-chat tools): an older host's sends
-// fail to decode here, and a relayed one with `localId` fails to decode there.
-export const MIN_SUPPORTED_HOST_VERSION = '1.1.2190';
+// 1.1.2200 is the first host whose audio server holds a dropped call's session and
+// takes `audio.session_start.resumes` (spec/07 § A dropped call comes back): an older
+// host rejects the frame, and ends a call the moment its line goes quiet. It also
+// carries `patch.send_to`'s `localId` and asks for a sent message's reply with
+// `patch.reply.request` (spec/03 § Cross-chat tools), from 1.1.2190.
+export const MIN_SUPPORTED_HOST_VERSION = '1.1.2200';
 
 export type HostSupport =
   | { supported: true }

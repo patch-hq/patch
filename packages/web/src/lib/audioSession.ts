@@ -83,8 +83,8 @@ export interface OpenAudioSessionOpts {
   addressWord?: string;
   /** Move the chat's call from another surface to this one (spec/07 § A call can move between devices). */
   takeOver?: boolean;
-  /** Redialling a call that dropped (spec/07 § A dropped call comes back). */
-  resumed?: boolean;
+  /** Redialling a call that dropped: the session it was last live on (spec/07 § A dropped call comes back). */
+  resumes?: string;
   /** Why the agent rang, on a call answering its `patch_call`: the voice opens with it. */
   callReason?: string;
   /**
@@ -334,7 +334,7 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
         ...(opts.mode !== undefined ? { mode: opts.mode } : {}),
         ...(opts.addressWord !== undefined ? { addressWord: opts.addressWord } : {}),
         ...(opts.takeOver === true ? { takeOver: true } : {}),
-        ...(opts.resumed === true ? { resumed: true } : {}),
+        ...(opts.resumes !== undefined ? { resumes: opts.resumes } : {}),
         ...(opts.callReason !== undefined ? { callReason: opts.callReason } : {}),
       };
       ws.send(JSON.stringify(start));
@@ -376,7 +376,8 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
           );
         },
         end(reason?: string): void {
-          if (ws.readyState === WS.OPEN) {
+          // A lost line says nothing: the host must see a drop, not an ending, to hold the call.
+          if (reason !== 'lost' && ws.readyState === WS.OPEN) {
             try {
               ws.send(
                 JSON.stringify({

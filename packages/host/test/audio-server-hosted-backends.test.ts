@@ -329,6 +329,7 @@ describe('audio server — hosted backends on every app surface', () => {
     });
     expect(log).toEqual([`user:${chatId}:what is a nebula`, `reply:${chatId}:A cloud of gas.`]);
 
+    surface.ws.send(JSON.stringify({ type: 'audio.session_end' }));
     surface.ws.close();
     await until(() => expect(ended).toHaveLength(1));
     expect(ended[0]!.chatId).toBe(chatId);

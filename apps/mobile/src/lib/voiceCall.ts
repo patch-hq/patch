@@ -249,16 +249,18 @@ export function startVoiceCall(
   // 2) The line dials, and redials whenever it drops.
   const line: CallLine = new CallLine(
     {
-      dial: (attempt, resumed) => {
+      dial: (attempt, resumes) => {
         // A redial goes to the chat the call is on now: the voice agent may have switched it.
         const onChat = useVoiceStore.getState().activeSession?.chatId ?? chatId;
         void openAttempt(line, onChat, attempt, {
           takeOver: opts.takeOver === true && attempt === 1,
-          resumed,
+          resumes,
           // Never repeated on a redial: the voice already opened with it.
-          ...(opts.callReason !== undefined && !resumed ? { callReason: opts.callReason } : {}),
+          ...(opts.callReason !== undefined && resumes === null
+            ? { callReason: opts.callReason }
+            : {}),
           // A paused call kept its service, and a redial never stopped it.
-          serviceUp: opts.resume === true || resumed,
+          serviceUp: opts.resume === true || resumes !== null,
         });
       },
       hangUp: closeAttempt,
@@ -280,7 +282,7 @@ async function openAttempt(
   line: CallLine,
   chatId: string,
   attempt: number,
-  opts: { takeOver: boolean; resumed: boolean; callReason?: string; serviceUp: boolean },
+  opts: { takeOver: boolean; resumes: string | null; callReason?: string; serviceUp: boolean },
 ): Promise<void> {
   const current = (): boolean => _line === line && line.isCurrent(attempt);
   try {
@@ -375,7 +377,7 @@ async function openAttempt(
       mode: useVoiceStore.getState().callMode,
       ...(addressWord !== null ? { addressWord } : {}),
       ...(opts.takeOver ? { takeOver: true } : {}),
-      ...(opts.resumed ? { resumed: true } : {}),
+      ...(opts.resumes !== null ? { resumes: opts.resumes } : {}),
       ...(opts.callReason !== undefined ? { callReason: opts.callReason } : {}),
     };
     let replies = 0;

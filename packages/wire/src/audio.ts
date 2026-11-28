@@ -563,11 +563,13 @@ export const AudioSessionStartEvent = z
      */
     takeOver: z.boolean().optional(),
     /**
-     * A surface redialling a call that dropped (a server or host restart, a
-     * network change). The host writes a line into the chat saying the call was
-     * picked back up (`07-voice-app.md` § A dropped call comes back).
+     * A surface redialling a call whose line dropped: the session it was last
+     * live on. The host, which holds that session for `CALL_RESUME_WINDOW_MS`,
+     * puts this connection back on it; a session it no longer holds (the
+     * window ran out, the host restarted) opens a new one and the chat says so
+     * (`07-voice-app.md` § A dropped call comes back).
      */
-    resumed: z.boolean().optional(),
+    resumes: z.string().min(1).optional(),
     /**
      * The reason an agent gave when it called the user (`patch_call`), on the
      * call that answers it. The voice agent opens the call by saying it
@@ -930,6 +932,15 @@ export const HEARTBEAT_INTERVAL_MS = 1_000;
  * as lost: three missed heartbeats, so one late frame is not a drop.
  */
 export const HEARTBEAT_LOST_AFTER_MS = 3 * HEARTBEAT_INTERVAL_MS;
+
+/**
+ * How long the host keeps a call's session after its device's line goes quiet,
+ * waiting for the device to resume it (spec/07 § Fixed timings): about the
+ * span of the device's redial schedule, so a stall or a release restarting
+ * the server is ridden out, while a phone that is gone for good costs the
+ * provider two minutes of silence.
+ */
+export const CALL_RESUME_WINDOW_MS = 120_000;
 
 /**
  * Both ways on every app audio session. The host sends one every `HEARTBEAT_INTERVAL_MS`,

@@ -28,6 +28,7 @@ import {
   voiceKeyMissingMessage,
   DEFAULT_VOICE_CONFIG,
   type AudioCallLogEvent,
+  CALL_RESUME_WINDOW_MS,
   DEFAULT_VOICE_AGENT,
   VOICE_AGENT_ENGINES,
   soundConfig,
@@ -267,6 +268,8 @@ export interface AudioServerOptions {
   maxConcurrentSessions?: number;
   /** Heartbeat interval on an app call. Tests shorten it; production uses the wire's. */
   heartbeatIntervalMs?: number;
+  /** How long a call is held for its device to resume it. Tests shorten it; production uses the wire's. */
+  resumeWindowMs?: number;
   /**
    * Fired when a physical voice-device session (surfaceKind === 'device')
    * opens (`active: true`) or closes (`active: false`). The host wires this
@@ -415,7 +418,18 @@ export interface AudioServerHandle {
 
 interface ActiveSession {
   session: VoiceSessionLike;
-  socket: WebSocket;
+  /** The session's id on the wire: its frames name it, whichever connection carries them. */
+  id: string;
+  /**
+   * The connection the session is on now. A held call's session outlives its
+   * connection and is put on the next one (spec/07 § A dropped call comes back),
+   * so everything the session sends goes through this.
+   */
+  link: { socket: WebSocket };
+  /** Set while the device's line is down and the session waits for it to resume. */
+  held?: { since: number; timer: NodeJS.Timeout };
+  /** The session was ended on purpose (the user, the agent, a transfer, an error, shutdown): not a drop. */
+  endedHere?: boolean;
   /**
    * When this session's surface last showed the user was at it — a mic frame,
    * an utterance, a control frame. An interrupt goes to the surface the user is
@@ -503,6 +517,82 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     });
   };
 
+  // spec/07 § A dropped call comes back — a call's session outlives its
+  // connection. When the device's line goes quiet the session is held for
+  // `resumeWindowMs`, with its provider conversation, open hand-offs and
+  // pending pushes, and ends only when the window runs out, or on purpose.
+  const resumeWindowMs = opts.resumeWindowMs ?? CALL_RESUME_WINDOW_MS;
+  // Connections closed on purpose (the user ending the call, the agent, a
+  // transfer, an error already reported): their close is not a drop.
+  const closedHere = new WeakSet<WebSocket>();
+
+  /** End `active` on purpose: close its connection, or finish it at once if it is held. */
+  const endHere = (active: ActiveSession, code: number, reason?: string): void => {
+    const socket = active.link.socket;
+    closedHere.add(socket);
+    if (active.held !== undefined) {
+      finish(active);
+      return;
+    }
+    if (socket.readyState === socket.OPEN) socket.close(code, reason);
+  };
+
+  /** The session is over: announce it, close the provider session, record what it did. */
+  const finish = (active: ActiveSession): void => {
+    if (active.held !== undefined) clearTimeout(active.held.timer);
+    active.heartbeat?.stop();
+    if (surfaceIndex.get(active.surfaceId) === active.id) surfaceIndex.delete(active.surfaceId);
+    announceCall(active, false);
+    void active.session.close().catch(() => undefined);
+    if (active.deviceId !== undefined) {
+      opts.onDeviceSession?.(active.deviceId, false);
+    }
+    // A phone-side voice-call ending lets a queued device event proceed
+    // (spec/16 priority: phone-active-call > device-active-session).
+    const wasPhoneCall = active.role === 'voice-call' && active.surfaceKind !== 'device';
+    opts.onSessionClosed?.({ wasPhoneCall });
+    if (active.call) {
+      opts.onCallEnded?.({
+        init: active.call.init,
+        chatId: active.session.getCurrentChatId(),
+        startedAt: active.call.startedAt,
+        endedAt: Date.now(),
+        engine: active.session.engineCosting(),
+      });
+    }
+    const stats = {
+      ...active.session.stats(),
+      ...(active.heartbeat !== undefined ? { heartbeat: active.heartbeat.stats() } : {}),
+      ...(active.callLog !== undefined ? { callLog: active.callLog } : {}),
+    };
+    sessions.delete(active.id);
+    // Close the session with what it actually did. "Started" then "ended"
+    // with nothing between them describes every possible failure equally;
+    // these numbers say which one it was — no mic audio at all, audio but
+    // no end-of-utterance, or a turn that ran and produced nothing.
+    log.info({ sessionId: active.id, active: sessions.size, ...stats }, 'audio: session ended');
+  };
+
+  /** The device's line went quiet: keep the session, and end it if the window runs out. */
+  const hold = (active: ActiveSession): void => {
+    active.heartbeat?.stop();
+    delete active.heartbeat;
+    active.session.setLine(false);
+    const timer = setTimeout(() => {
+      log.warn(
+        { sessionId: active.id, windowMs: resumeWindowMs },
+        'audio: the call was not resumed in time, ending it',
+      );
+      finish(active);
+    }, resumeWindowMs);
+    timer.unref();
+    active.held = { since: Date.now(), timer };
+    log.warn(
+      { sessionId: active.id, windowMs: resumeWindowMs },
+      'audio: line lost, holding the call for its device to resume',
+    );
+  };
+
   // spec/07 § The agent ends the call — a clean hang-up, never read as a drop.
   // A phone that dropped just as the agent hung up redials; that redial must
   // be told the call is over, not be given a new call.
@@ -510,9 +600,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
   const hangUpByAgent = (active: ActiveSession): void => {
     if (active.call !== undefined) endedByAgentAt.set(active.call.init.chatId, Date.now());
     if (active.callAnnounced === true) announceCall(active, false);
-    if (active.socket.readyState === active.socket.OPEN) {
-      active.socket.close(CLOSE_NORMAL, END_BY_AGENT);
-    }
+    endHere(active, CLOSE_NORMAL, END_BY_AGENT);
   };
 
   // Forward-declared so the HTTP request handler (defined before the handle's
@@ -522,7 +610,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     const sid = surfaceIndex.get(surfaceId);
     if (!sid) return false;
     const active = sessions.get(sid);
-    if (!active) return false;
+    if (!active || active.held !== undefined) return false;
     log.info(
       { surfaceId, sessionId: sid, textLen: text.length },
       'audio: speakCanned dispatching Kokoro TTS to device session',
@@ -617,6 +705,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
 
   function rejectConn(ws: WebSocket, code: AudioErrorCode, message: string): void {
     send(ws, { type: 'audio.error', code, message });
+    closedHere.add(ws);
     // Explicit close code + reason (E1-d4) so the close frame itself, not just
     // the preceding audio.error event, says why. WS reason is capped at 123
     // bytes by the protocol.
@@ -628,13 +717,15 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     let session: VoiceSessionLike | undefined;
     /** Whether this is a sustained app session — the only kind with a mode to switch. */
     let isAppCall = false;
+    /** The session this connection is on: its own, or the held one it resumed. */
+    let key = urlSessionId;
     let pendingBinaryMeta: { samples: number } | undefined;
 
     const liveness = watchPeerLiveness(ws, {
       onGone: (silentMs) =>
         log.warn(
           { sessionId: urlSessionId, silentMs },
-          'audio: nothing heard from the peer, ending session',
+          'audio: nothing heard from the peer, closing its connection',
         ),
     });
     ws.on('message', (data: Buffer | string, isBinary: boolean) => {
@@ -710,7 +801,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         // Mic frames are the liveness signal for "the user is at this surface"
         // (spec/07 § Which surface it reaches). A muted or pocketed session
         // still sends them, which is right: the phone is still with them.
-        const live = sessions.get(urlSessionId);
+        const live = sessions.get(key);
         if (live) live.lastActivityAt = Date.now();
         void session.onMicFrame(pcm).catch((err: Error) => {
           log.warn({ err: err.message }, 'audio: mic frame error');
@@ -787,7 +878,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           rejectConn(ws, 'token_replayed', 'voice token jti reused');
           return;
         }
-        if (start.resumed === true) {
+        if (start.resumes !== undefined) {
           const endedAt = endedByAgentAt.get(start.chatId);
           if (endedAt !== undefined && Date.now() - endedAt < REDIAL_AFTER_AGENT_END_MS) {
             log.info(
@@ -797,6 +888,47 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ws.close(CLOSE_NORMAL, END_BY_AGENT);
             return;
           }
+        }
+        // A redial of a call whose line dropped: the session is still here, held
+        // (or its old connection not yet noticed gone), so this connection is put
+        // back on it, with the same provider conversation, hand-offs and pushes.
+        const prior = start.resumes !== undefined ? sessions.get(start.resumes) : undefined;
+        if (
+          prior !== undefined &&
+          prior.call !== undefined &&
+          prior.surfaceId === start.surfaceId &&
+          prior.accountId === start.accountId
+        ) {
+          if (prior.held !== undefined) {
+            clearTimeout(prior.held.timer);
+            delete prior.held;
+          } else {
+            // Its old connection has not been judged gone yet: this one replaces it.
+            prior.heartbeat?.stop();
+          }
+          const old = prior.link.socket;
+          prior.link.socket = ws;
+          if (old !== ws) {
+            closedHere.add(old);
+            old.terminate();
+          }
+          session = prior.session;
+          key = prior.id;
+          isAppCall = true;
+          prior.lastActivityAt = Date.now();
+          // The first state that is not `connecting` is how the device knows the line is back.
+          send(ws, { type: 'audio.state', sessionId: prior.id, state: prior.session.getState() });
+          prior.heartbeat = startCallHeartbeat(
+            prior.id,
+            (frame) => send(ws, frame),
+            opts.heartbeatIntervalMs,
+          );
+          prior.session.setLine(true);
+          log.info(
+            { sessionId: prior.id, redialSessionId: start.sessionId },
+            'audio: call resumed on a new connection',
+          );
+          return;
         }
         if (sessions.size >= cap) {
           rejectConn(
@@ -817,9 +949,9 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           ...(start.deviceId !== undefined ? { deviceId: start.deviceId } : {}),
           ...(start.mode !== undefined ? { mode: start.mode } : {}),
           ...(start.addressWord !== undefined ? { addressWord: start.addressWord } : {}),
-          ...(start.resumed === true ? { resumed: true } : {}),
+          ...(start.resumes !== undefined ? { resumed: true } : {}),
           // Said once, when the call first connects — never again on a redial.
-          ...(start.callReason !== undefined && start.resumed !== true
+          ...(start.callReason !== undefined && start.resumes === undefined
             ? { callReason: start.callReason }
             : {}),
         };
@@ -868,16 +1000,25 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         // A hosted session whose provider side dies ends the surface session
         // too — the surface must stop streaming into a dead engine.
         const onFatal = (message: string): void => {
-          if (ws.readyState === ws.OPEN) ws.close(CLOSE_BAD_FRAME, closeReason(message));
+          const entry = sessions.get(start.sessionId);
+          if (entry !== undefined) endHere(entry, CLOSE_BAD_FRAME, closeReason(message));
+          else if (link.socket.readyState === link.socket.OPEN) {
+            closedHere.add(link.socket);
+            link.socket.close(CLOSE_BAD_FRAME, closeReason(message));
+          }
         };
         const sessionLog = log.child({
           sessionId: start.sessionId,
           surface: voiceSurface,
           backend: dictationEngine ?? backend,
         });
-        const sendAudioFn = (ev: AudioEvent): void => send(ws, ev);
+        // Everything the session sends goes to the connection it is on now.
+        const link = { socket: ws };
+        const sendAudioFn = (ev: AudioEvent): void => send(link.socket, ev);
         const sendBinaryFn = (pcm: Int16Array): void =>
-          ws.send(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), { binary: true });
+          link.socket.send(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), {
+            binary: true,
+          });
         // Hosted engines speak 24 kHz; a voice device plays 48 kHz (spec/16
         // § Audio WSS), so their audio to a device is upsampled as it streams.
         // (VoiceSession upsamples its own device audio.)
@@ -1145,7 +1286,8 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         session.onSessionStart();
         sessions.set(start.sessionId, {
           session,
-          socket: ws,
+          id: start.sessionId,
+          link,
           lastActivityAt: Date.now(),
           ...(isAppCall ? { call: { init: sessionInit, startedAt: Date.now() } } : {}),
           surfaceId: start.surfaceId,
@@ -1167,7 +1309,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           const live = sessions.get(start.sessionId) as ActiveSession;
           live.heartbeat = startCallHeartbeat(
             start.sessionId,
-            (frame) => send(ws, frame),
+            (frame) => send(link.socket, frame),
             opts.heartbeatIntervalMs,
           );
         }
@@ -1181,9 +1323,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
               if (other.call.init.chatId !== start.chatId) continue;
               if (other.surfaceId === start.surfaceId) continue;
               announceCall(other, false);
-              if (other.socket.readyState === other.socket.OPEN) {
-                other.socket.close(CLOSE_BAD_FRAME, 'transferred');
-              }
+              endHere(other, CLOSE_BAD_FRAME, 'transferred');
             }
           }
           announceCall(sessions.get(start.sessionId) as ActiveSession, true);
@@ -1253,15 +1393,19 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           const active = session;
           const isNoteCommit =
             (parsed as { reason?: string }).reason === 'committed' &&
-            sessions.get(urlSessionId)?.role === 'voice-note';
+            sessions.get(key)?.role === 'voice-note';
           if (isNoteCommit) {
             void active
               .finalizeNote()
               .catch((err: Error) => {
                 log.warn({ err: err.message }, 'audio: voice-note finalize error');
               })
-              .finally(() => ws.close());
+              .finally(() => {
+                closedHere.add(ws);
+                ws.close();
+              });
           } else {
+            closedHere.add(ws);
             ws.close();
           }
           break;
@@ -1300,14 +1444,16 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         }
         case 'audio.heartbeat':
           // The surface's echo: the round trip for the heartbeat it names.
-          (sessions.get(urlSessionId) as ActiveSession).heartbeat?.echoed(parsed.n);
+          sessions.get(key)?.heartbeat?.echoed(parsed.n);
           break;
         case 'audio.call_log': {
           // spec/07 § Call logs — the device's own account of the call: why its
           // audio stopped, the line's quality, how long each turn's steps
           // took. Entries may be about an earlier session of the same call
           // (one that dropped); each names its own.
-          const live = sessions.get(urlSessionId) as ActiveSession;
+          const live = sessions.get(key);
+          // The host is shutting down: the session is gone and so is its log.
+          if (live === undefined) break;
           live.callLog = [...(live.callLog ?? []), ...parsed.entries];
           log.info(
             {
@@ -1327,43 +1473,17 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     });
 
     ws.on('close', () => {
-      if (claims) {
-        const id = claims.sessionId;
-        const active = sessions.get(id);
-        if (active) {
-          active.heartbeat?.stop();
-          surfaceIndex.delete(active.surfaceId);
-          announceCall(active, false);
-          void active.session.close().catch(() => undefined);
-          if (active.deviceId !== undefined) {
-            opts.onDeviceSession?.(active.deviceId, false);
-          }
-          // A phone-side voice-call ending lets a queued device event proceed
-          // (spec/16 priority: phone-active-call > device-active-session).
-          const wasPhoneCall = active.role === 'voice-call' && active.surfaceKind !== 'device';
-          opts.onSessionClosed?.({ wasPhoneCall });
-          if (active.call) {
-            opts.onCallEnded?.({
-              init: active.call.init,
-              chatId: active.session.getCurrentChatId(),
-              startedAt: active.call.startedAt,
-              endedAt: Date.now(),
-              engine: active.session.engineCosting(),
-            });
-          }
-        }
-        const stats = {
-          ...active?.session.stats(),
-          ...(active?.heartbeat !== undefined ? { heartbeat: active.heartbeat.stats() } : {}),
-          ...(active?.callLog !== undefined ? { callLog: active.callLog } : {}),
-        };
-        sessions.delete(id);
-        // Close the session with what it actually did. "Started" then "ended"
-        // with nothing between them describes every possible failure equally;
-        // these numbers say which one it was — no mic audio at all, audio but
-        // no end-of-utterance, or a turn that ran and produced nothing.
-        log.info({ sessionId: id, active: sessions.size, ...stats }, 'audio: session ended');
+      if (!claims) return;
+      const active = sessions.get(key);
+      // Not this connection's session any more: a resume took it over.
+      if (active === undefined || active.link.socket !== ws) return;
+      // A call whose connection dropped is held for its device to resume; one
+      // closed on purpose, or any other session, is over.
+      if (active.call !== undefined && active.surfaceKind !== 'device' && !closedHere.has(ws)) {
+        hold(active);
+        return;
       }
+      finish(active);
     });
 
     ws.on('error', (err: Error) => {
@@ -1424,7 +1544,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           announceCall(entry, true);
         }
       }
-      send(entry.socket, { type: 'audio.chat_switched', sessionId, chatId });
+      send(entry.link.socket, { type: 'audio.chat_switched', sessionId, chatId });
     },
     sessionsOnChat(chatId: string): VoiceSessionLike[] {
       return [...sessions.values()]
@@ -1461,6 +1581,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
       let best = -1;
       for (const [, active] of sessions) {
         if (active.role !== 'voice-call' || active.surfaceKind === 'device') continue;
+        if (active.held !== undefined) continue;
         if (active.lastActivityAt > best) {
           best = active.lastActivityAt;
           target = active.surfaceId;
@@ -1497,8 +1618,10 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     },
     async close(): Promise<void> {
       for (const [, active] of sessions) {
+        if (active.held !== undefined) clearTimeout(active.held.timer);
+        closedHere.add(active.link.socket);
         try {
-          active.socket.close();
+          active.link.socket.close();
         } catch {
           /* ignore */
         }

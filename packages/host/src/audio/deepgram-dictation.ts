@@ -328,4 +328,7 @@ export class DeepgramDictationSession implements VoiceSessionLike {
     return { backend: 'local', model: DEEPGRAM_MODEL, tokens: null, stt: null };
   }
   pushMessage(): void {}
+
+  /** A session with no voice agent holds nothing for the line (only app calls are held). */
+  setLine(): void {}
 }

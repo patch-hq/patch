@@ -8,8 +8,8 @@
 // - when an attempt is live (the host acknowledged it), and when it is lost: a
 //   closed connection, the host gone, no answer in time, or three seconds
 //   without a heartbeat;
-// - redialling a lost line on one backoff, telling the host it is a resumed
-//   call, saying once when it has run out of schedule, and redialling at once
+// - redialling a lost line on one backoff, naming the session it was last live
+//   on so the host resumes it, saying once when it has run out of schedule, and redialling at once
 //   when the app comes back to the foreground;
 // - the call log: why audio stopped, the heartbeat's measure of the
 //   connection, how long each step of each turn took, sent to the host when
@@ -61,8 +61,11 @@ export interface CallLineClock {
 
 /** What the line asks of the surface it runs on. */
 export interface CallLineSurface {
-  /** Open a session for this attempt; `resumed` on a redial. */
-  dial(attempt: number, resumed: boolean): void;
+  /**
+   * Open a session for this attempt. `resumes` names the session the call was
+   * last live on, on a redial: the host puts the attempt back on it.
+   */
+  dial(attempt: number, resumes: string | null): void;
   /** Close this attempt's session: the line has written it off. The call goes on. */
   hangUp(attempt: number): void;
   /** Send a frame on this attempt's session; false when it has none open. */
@@ -165,7 +168,7 @@ export class CallLine {
 
   /** Place the call. */
   start(): void {
-    this.dial(false);
+    this.dial(null);
   }
 
   /** The host acknowledged the attempt (its first turn state): the line is live. */
@@ -273,7 +276,7 @@ export class CallLine {
     ) {
       this.startRetried = true;
       this.surface.hangUp(attempt);
-      this.dial(false);
+      this.dial(null);
       return;
     }
     this.move('failed', message);
@@ -322,7 +325,7 @@ export class CallLine {
   foreground(): void {
     if (this.ended || this.redialTimer === null) return;
     this.clear('redialTimer');
-    this.dial(true);
+    this.dial(this.lastLiveSessionId);
   }
 
   /** The user ended the call: the log goes to the host, and the line stops. */
@@ -338,7 +341,7 @@ export class CallLine {
     this.stopTimers();
   }
 
-  private dial(resumed: boolean): void {
+  private dial(resumes: string | null): void {
     this.cur = CallLine.attempt(this.cur.n + 1, this.clock.now());
     const attempt = this.cur.n;
     // Cleared on the ack and whenever the attempt is written off.
@@ -348,7 +351,7 @@ export class CallLine {
       this.lost(attempt, 'connect_timeout', `no answer from the host after ${secs}s`);
       this.surface.hangUp(attempt);
     }, CALL_ACK_TIMEOUT_MS);
-    this.surface.dial(attempt, resumed);
+    this.surface.dial(attempt, resumes);
   }
 
   private scheduleRedial(reason: string): void {
@@ -358,7 +361,7 @@ export class CallLine {
     this.redials += 1;
     this.redialTimer = this.clock.setTimeout(() => {
       this.redialTimer = null;
-      this.dial(true);
+      this.dial(this.lastLiveSessionId);
     }, delay);
   }
 

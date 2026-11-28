@@ -578,6 +578,7 @@ describe('audio WSS server', () => {
         }),
       );
       await new Promise((r) => setTimeout(r, 50));
+      wsCall.send(encodeAudio({ type: 'audio.session_end' }));
       wsCall.close();
       await new Promise((r) => setTimeout(r, 50));
 
@@ -1555,6 +1556,7 @@ describe('audio WSS server', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(server.phoneCallActive()).toBe(true);
 
+    wsCall.send(encodeAudio({ type: 'audio.session_end' }));
     wsCall.close();
     await new Promise((r) => setTimeout(r, 50));
     expect(server.phoneCallActive()).toBe(false);

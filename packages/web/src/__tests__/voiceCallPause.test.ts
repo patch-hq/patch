@@ -111,7 +111,7 @@ describe('pausing a call', () => {
     expect(opened).toHaveLength(2);
     expect(last().opts.chatId).toBe('c1');
     expect(last().opts.mode).toBe('hands-free');
-    expect(last().opts.resumed).toBeUndefined();
+    expect(last().opts.resumes).toBeUndefined();
     expect(useVoiceStore.getState().call?.paused).toBeNull();
     expect(useVoiceStore.getState().session).not.toBeNull();
     expect(sound).toHaveBeenLastCalledWith('connected');
@@ -140,7 +140,7 @@ describe('pausing a call', () => {
     last().callbacks.onClose();
     await vi.advanceTimersByTimeAsync(1_000);
     expect(opened).toHaveLength(2);
-    expect(last().opts.resumed).toBe(true);
+    expect(last().opts.resumes).toEqual(expect.any(String));
     expect(last().opts.callReason).toBeUndefined();
   });
 });

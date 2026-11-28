@@ -363,20 +363,20 @@ describe('a dropped call says so', () => {
     expect(FakeCallTransport.instances.length).toBe(before + 1);
   });
 
-  it('a redial tells the host it is picking a dropped call back up; a first dial does not', async () => {
+  it('a redial names the session it was last live on so the host can resume it; a first dial does not', async () => {
     startVoiceCall('c1');
     const sock = await liveCall();
-    const first = JSON.parse(String(sock.sent[0])) as { resumed?: boolean };
-    expect(first.resumed).toBeUndefined();
+    const first = JSON.parse(String(sock.sent[0])) as { resumes?: string };
+    expect(first.resumes).toBeUndefined();
     sock.emitClose(1006);
     vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
     await flush();
     const again = FakeCallTransport.last();
     again.emitOpen();
     await flush();
-    const start = JSON.parse(String(again.sent[0])) as { type: string; resumed?: boolean };
+    const start = JSON.parse(String(again.sent[0])) as { type: string; resumes?: string };
     expect(start.type).toBe('audio.session_start');
-    expect(start.resumed).toBe(true);
+    expect(start.resumes).toEqual(expect.any(String));
   });
 
   it('keeps redialling for about two minutes, long enough to ride out a release', () => {

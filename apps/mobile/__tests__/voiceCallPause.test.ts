@@ -158,7 +158,7 @@ describe('pause', () => {
     await flush();
     const start = frames(ws).find((f) => f.type === 'audio.session_start')!;
     expect(start).toMatchObject({ chatId: 'c1', mode: 'hands-free' });
-    expect(start['resumed']).toBeUndefined();
+    expect(start['resumes']).toBeUndefined();
     // The service never went away: it is told to take the audio back, not started again.
     expect(startVoiceAudioServiceMock).not.toHaveBeenCalled();
     expect(updateVoiceAudioServiceMock).toHaveBeenLastCalledWith(
@@ -262,7 +262,7 @@ describe("an agent's call", () => {
     again.emitOpen();
     await flush();
     const start = frames(again).find((f) => f.type === 'audio.session_start')!;
-    expect(start['resumed']).toBe(true);
+    expect(start['resumes']).toEqual(expect.any(String));
     expect(start['callReason']).toBeUndefined();
   });
 
